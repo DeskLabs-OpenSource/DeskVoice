@@ -192,10 +192,10 @@ function piecesOf(voice: SpeechSynthesizer, script: SimulatedTranscriptScript, o
   };
 }
 
-async function open(pieces: PipelinePieces, extra: Partial<PipelineConnectOptions> = {}, cache = new FixedSpeechCache()) {
+async function open(pieces: PipelinePieces, extra: Partial<PipelineConnectOptions> = {}, cache = new FixedSpeechCache(), sessionConfig: VoiceSessionConfig = config) {
   if (!brain) throw new Error("sem cérebro");
   const engine = createPipelineEngine({ fetch: brain.fetch, fixedSpeechCache: cache });
-  const session = await engine.connect(config, "", { pieces, organizationId: ORG, ...extra });
+  const session = await engine.connect(sessionConfig, "", { pieces, organizationId: ORG, ...extra });
   return { session, log: record(session) };
 }
 
@@ -291,7 +291,7 @@ describe("motor pipeline (fatia 3a): o aceite", () => {
     const brainLines = log.pieceUsage.filter((line) => line.piece === "brain");
     expect(brainLines[0]).toEqual({ piece: "brain", id: "openai", model: "gpt-5-nano", usage: { inputTokens: 30, cachedInputTokens: 0, outputTokens: 6 }, costMicrocents: 390, estimated: false });
     const voiceLines = log.pieceUsage.filter((line) => line.piece === "synthesizer");
-    expect(voiceLines[0]).toMatchObject({ piece: "synthesizer", id: "simulated", model: "simulated", characters: [...PIPELINE_FAILURE_SPEECH].length, estimated: true });
+    expect(voiceLines[0]).toMatchObject({ piece: "synthesizer", id: "simulated", model: "simulated", characters: [...PIPELINE_FAILURE_SPEECH["pt-BR"]].length, estimated: true });
     const spoken = ["Bom dia! Como posso ajudar?", "Marquei para terça. Mais alguma coisa?", "Até logo! Obrigado pela ligação."].join("");
     expect(voiceLines.slice(1).reduce((sum, line) => sum + (line.characters ?? 0), 0)).toBe([...spoken].length);
     expect(log.pieceUsage.filter((line) => line.piece === "transcriber")).toEqual([{ piece: "transcriber", id: "simulated", usage: { seconds: 0.6 }, costMicrocents: 0, estimated: false }]);
@@ -492,7 +492,7 @@ describe("motor pipeline: o cache das falas fixas não atravessa organizações"
       await session.close();
       return log.pieceUsage.filter((line) => line.piece === "synthesizer").reduce((sum, line) => sum + (line.characters ?? 0), 0);
     };
-    const paid = [...PIPELINE_FAILURE_SPEECH].length + [..."Tchau."].length;
+    const paid = [...PIPELINE_FAILURE_SPEECH["pt-BR"]].length + [..."Tchau."].length;
     expect(await connect("org-a")).toBe(paid);
     expect(voice.opens()).toBe(2);
     expect(await connect("org-b")).toBe(paid);
@@ -545,8 +545,8 @@ describe("motor pipeline: a falha (3.4) nunca deixa a sessão muda", () => {
     speak(session, 20);
     await until(() => log.events.includes("closed failed"), "o fim");
     // O `error` sozinho é aviso; o `closed` logo depois é que derruba, com o motivo dele.
-    expect(log.events).toEqual(["error transcriber unreachable segue", `agent: ${PIPELINE_FAILURE_SPEECH}`, "error transcriber unreachable fatal", "closed failed"]);
-    expect(log.audioBytes()).toBe(toneFor([...PIPELINE_FAILURE_SPEECH].length).length);
+    expect(log.events).toEqual(["error transcriber unreachable segue", `agent: ${PIPELINE_FAILURE_SPEECH["pt-BR"]}`, "error transcriber unreachable fatal", "closed failed"]);
+    expect(log.audioBytes()).toBe(toneFor([...PIPELINE_FAILURE_SPEECH["pt-BR"]].length).length);
     expect(log.errors[1]).toMatchObject({ piece: "transcriber", pieceId: "simulated", fatal: true });
   });
 
@@ -575,7 +575,7 @@ describe("motor pipeline: a falha (3.4) nunca deixa a sessão muda", () => {
     emitOn(heard, "error", new TranscriberOpenError("no_credit", "deepgram: quota exceeded for this project"));
     emitOn(heard, "closed", "failed");
     await until(() => log.events.includes("closed failed"), "o fim");
-    expect(log.events).toEqual(["error transcriber no_credit segue", `agent: ${PIPELINE_FAILURE_SPEECH}`, "error transcriber no_credit fatal", "closed failed"]);
+    expect(log.events).toEqual(["error transcriber no_credit segue", `agent: ${PIPELINE_FAILURE_SPEECH["pt-BR"]}`, "error transcriber no_credit fatal", "closed failed"]);
     // O texto do provedor fica só na mensagem, para o log.
     expect(log.errors[1]?.message).toContain("quota exceeded");
   });
@@ -588,7 +588,7 @@ describe("motor pipeline: a falha (3.4) nunca deixa a sessão muda", () => {
     const { log } = await open(piecesOf(voice.synthesizer, [], { transcriber: { piece: transcriber, apiKey: "" } }));
     emitOn(heard, "closed", "failed");
     await until(() => log.events.includes("closed failed"), "o fim");
-    expect(log.events).toEqual([`agent: ${PIPELINE_FAILURE_SPEECH}`, "error transcriber unreachable fatal", "closed failed"]);
+    expect(log.events).toEqual([`agent: ${PIPELINE_FAILURE_SPEECH["pt-BR"]}`, "error transcriber unreachable fatal", "closed failed"]);
   });
 
   it("a voz que cai no meio da fala toca a fala de falha pronta, que não depende dela", async () => {
@@ -616,8 +616,8 @@ describe("motor pipeline: a falha (3.4) nunca deixa a sessão muda", () => {
     const { session, log } = await open(piecesOf(breaking, [{ afterAudioMs: 20, text: "Oi.", final: true }]));
     speak(session, 20);
     await until(() => log.events.includes("closed failed"), "o fim");
-    expect(log.events.filter((event) => event !== "activity")).toEqual(["turn ended (transcript)", "user: Oi.", `agent: ${PIPELINE_FAILURE_SPEECH}`, "error synthesizer no_credit fatal", "closed failed"]);
-    expect(log.audioBytes()).toBe(toneFor([...PIPELINE_FAILURE_SPEECH].length).length);
+    expect(log.events.filter((event) => event !== "activity")).toEqual(["turn ended (transcript)", "user: Oi.", `agent: ${PIPELINE_FAILURE_SPEECH["pt-BR"]}`, "error synthesizer no_credit fatal", "closed failed"]);
+    expect(log.audioBytes()).toBe(toneFor([...PIPELINE_FAILURE_SPEECH["pt-BR"]].length).length);
     expect(log.errors[0]?.message).not.toContain("chave");
   });
 
@@ -698,8 +698,8 @@ describe("motor pipeline: a falha (3.4) nunca deixa a sessão muda", () => {
     const { session, log } = await open(piecesOf(refusing, [{ afterAudioMs: 20, text: "Oi.", final: true }]));
     speak(session, 20);
     await until(() => log.events.includes("closed failed"), "o fim");
-    expect(log.events.slice(-3)).toEqual([`agent: ${PIPELINE_FAILURE_SPEECH}`, "error synthesizer rate_limited fatal", "closed failed"]);
-    expect(log.audioBytes()).toBe(toneFor([...PIPELINE_FAILURE_SPEECH].length).length);
+    expect(log.events.slice(-3)).toEqual([`agent: ${PIPELINE_FAILURE_SPEECH["pt-BR"]}`, "error synthesizer rate_limited fatal", "closed failed"]);
+    expect(log.audioBytes()).toBe(toneFor([...PIPELINE_FAILURE_SPEECH["pt-BR"]].length).length);
   });
 
   it("o cérebro que falha uma vez pede para repetir e a conversa segue; duas vezes seguidas, a fala de falha", async () => {
@@ -708,13 +708,13 @@ describe("motor pipeline: a falha (3.4) nunca deixa a sessão muda", () => {
     brain.reply({ status: 500, body: "{}" }, { status: 503, body: "{}" });
     const { session, log } = await open(piecesOf(voice.synthesizer, [{ afterAudioMs: 20, text: "Oi.", final: true }, { afterAudioMs: 40, text: "Oi?", final: true }]));
     speak(session, 20);
-    await until(() => log.events.includes(`agent: ${PIPELINE_BRAIN_RETRY_SPEECH}`), "o pedido de repetir");
-    await until(() => log.audioBytes() === toneFor([...PIPELINE_BRAIN_RETRY_SPEECH].length).length, "o áudio do pedido de repetir");
+    await until(() => log.events.includes(`agent: ${PIPELINE_BRAIN_RETRY_SPEECH["pt-BR"]}`), "o pedido de repetir");
+    await until(() => log.audioBytes() === toneFor([...PIPELINE_BRAIN_RETRY_SPEECH["pt-BR"]].length).length, "o áudio do pedido de repetir");
     expect(log.events).toContain("error brain provider_error segue");
     expect(log.events).not.toContain("closed failed");
     speak(session, 20);
     await until(() => log.events.includes("closed failed"), "o fim");
-    expect(log.events.slice(-3)).toEqual([`agent: ${PIPELINE_FAILURE_SPEECH}`, "error brain provider_error fatal", "closed failed"]);
+    expect(log.events.slice(-3)).toEqual([`agent: ${PIPELINE_FAILURE_SPEECH["pt-BR"]}`, "error brain provider_error fatal", "closed failed"]);
     // A recusa HTTP não foi cobrada: o zero dela é medido.
     expect(log.pieceUsage.filter((line) => line.piece === "brain")).toEqual([
       { piece: "brain", id: "openai", model: "gpt-5-nano", usage: {}, costMicrocents: 0, estimated: false },
@@ -808,7 +808,7 @@ describe("motor pipeline: a abertura", () => {
     const refused = open(pieces, { fixedSpeech: ["Tchau."] });
     await expect(refused).rejects.toMatchObject({ piece: "transcriber", reason: "no_credit" });
     const error = (await refused.catch((caught: unknown) => caught)) as PipelineOpenError;
-    const characters = [...PIPELINE_FAILURE_SPEECH].length + [..."Tchau."].length;
+    const characters = [...PIPELINE_FAILURE_SPEECH["pt-BR"]].length + [..."Tchau."].length;
     expect(error.spent).toEqual([{ piece: "synthesizer", id: "simulated", model: voice.synthesizer.defaultModel, usage: {}, characters, costMicrocents: expect.any(Number), estimated: true }]);
     expect(error.message).not.toContain("chave");
   });
@@ -1088,8 +1088,8 @@ describe("motor pipeline (fatia 3c-1): a latência por turno, no relógio da ses
     speak(session, 20);
     clock.advance(400);
     pieces.heard({ text: "Oi.", final: true, endMs: 100 });
-    await until(() => log.events.includes(`agent: ${PIPELINE_BRAIN_RETRY_SPEECH}`), "o pedido de repetir");
-    await until(() => log.audioBytes() === toneFor([...PIPELINE_BRAIN_RETRY_SPEECH].length).length, "o áudio do pedido de repetir");
+    await until(() => log.events.includes(`agent: ${PIPELINE_BRAIN_RETRY_SPEECH["pt-BR"]}`), "o pedido de repetir");
+    await until(() => log.audioBytes() === toneFor([...PIPELINE_BRAIN_RETRY_SPEECH["pt-BR"]].length).length, "o áudio do pedido de repetir");
     // A resposta vazia: o pedido termina sem texto, e nada toca.
     pieces.heard({ text: "Oi?", final: true, endMs: 200 });
     await until(() => log.pieceUsage.filter((line) => line.piece === "brain").length === 2, "a resposta vazia");
@@ -1269,16 +1269,16 @@ describe("motor pipeline (fatia 3c-2): a fala de transferência pronta", () => {
       return { events: log.events, audioBytes: log.audioBytes(), pushedAtOpen, opensAtOpen, charged };
     };
     const transfers = await run(true);
-    expect(transfers.events).toEqual(["error transcriber unreachable segue", `agent: ${PIPELINE_TRANSFER_SPEECH}`, "error transcriber unreachable fatal", "closed failed"]);
-    expect(transfers.audioBytes).toBe(toneFor([...PIPELINE_TRANSFER_SPEECH].length).length);
-    expect(transfers.pushedAtOpen).toEqual([`push 1 ${JSON.stringify(PIPELINE_TRANSFER_SPEECH)} flush`]);
+    expect(transfers.events).toEqual(["error transcriber unreachable segue", `agent: ${PIPELINE_TRANSFER_SPEECH["pt-BR"]}`, "error transcriber unreachable fatal", "closed failed"]);
+    expect(transfers.audioBytes).toBe(toneFor([...PIPELINE_TRANSFER_SPEECH["pt-BR"]].length).length);
+    expect(transfers.pushedAtOpen).toEqual([`push 1 ${JSON.stringify(PIPELINE_TRANSFER_SPEECH["pt-BR"])} flush`]);
     // O custo dela entra no consumo da voz, como o das outras falas prontas.
-    expect(transfers.charged).toBe([...PIPELINE_TRANSFER_SPEECH].length);
+    expect(transfers.charged).toBe([...PIPELINE_TRANSFER_SPEECH["pt-BR"]].length);
     for (const without of [await run(false), await run(undefined)]) {
-      expect(without.events).toEqual(["error transcriber unreachable segue", `agent: ${PIPELINE_FAILURE_SPEECH}`, "error transcriber unreachable fatal", "closed failed"]);
-      expect(without.pushedAtOpen).toEqual([`push 1 ${JSON.stringify(PIPELINE_FAILURE_SPEECH)} flush`]);
+      expect(without.events).toEqual(["error transcriber unreachable segue", `agent: ${PIPELINE_FAILURE_SPEECH["pt-BR"]}`, "error transcriber unreachable fatal", "closed failed"]);
+      expect(without.pushedAtOpen).toEqual([`push 1 ${JSON.stringify(PIPELINE_FAILURE_SPEECH["pt-BR"])} flush`]);
       expect(without.opensAtOpen).toBe(1);
-      expect(without.charged).toBe([...PIPELINE_FAILURE_SPEECH].length);
+      expect(without.charged).toBe([...PIPELINE_FAILURE_SPEECH["pt-BR"]].length);
     }
   });
 
@@ -1293,7 +1293,7 @@ describe("motor pipeline (fatia 3c-2): a fala de transferência pronta", () => {
       await session.close();
       return log.pieceUsage.filter((line) => line.piece === "synthesizer").reduce((sum, line) => sum + (line.characters ?? 0), 0);
     };
-    const paid = [...PIPELINE_TRANSFER_SPEECH].length;
+    const paid = [...PIPELINE_TRANSFER_SPEECH["pt-BR"]].length;
     expect(await connect("org-a")).toBe(paid);
     expect(voice.opens()).toBe(1);
     expect(await connect("org-a")).toBe(0);
@@ -1311,7 +1311,7 @@ describe("motor pipeline (fatia 4, ponta 2 da 3c-2): a abertura que ninguém uso
   it("a sessão fechada antes do primeiro ciclo emite o custo das falas prontas antes do `closed`, uma vez; a que segue na linha o emite no primeiro ciclo, uma vez", async () => {
     brain = await startFakeBrain();
     const engine = createPipelineEngine({ fetch: brain.fetch, fixedSpeechCache: new FixedSpeechCache() });
-    const paid = [...PIPELINE_FAILURE_SPEECH].length;
+    const paid = [...PIPELINE_FAILURE_SPEECH["pt-BR"]].length;
     // Fechada no mesmo ciclo da abertura (o fim da ligação durante ou logo depois dela): o custo sai no `close`.
     const unused = await engine.connect(config, "", { pieces: piecesOf(countedVoice().synthesizer, []), organizationId: "org-a" });
     const seen: string[] = [];
@@ -1332,7 +1332,7 @@ describe("motor pipeline (fatia 4, ponta 2 da 3c-2): a abertura que ninguém uso
   it("a peça que cai antes do primeiro ciclo: o custo das falas prontas sai na falha, antes do `closed`, uma vez (lacuna da DESA-433)", async () => {
     brain = await startFakeBrain();
     const engine = createPipelineEngine({ fetch: brain.fetch, fixedSpeechCache: new FixedSpeechCache() });
-    const paid = [...PIPELINE_FAILURE_SPEECH].length;
+    const paid = [...PIPELINE_FAILURE_SPEECH["pt-BR"]].length;
     let heard: SimulatedTranscription | undefined;
     const transcriber = createSimulatedTranscriber({ script: [], onSession: (opened) => (heard = opened) });
     const session = await engine.connect(config, "", { pieces: piecesOf(countedVoice().synthesizer, [], { transcriber: { piece: transcriber, apiKey: "" } }), organizationId: "org-a" });
@@ -1929,5 +1929,42 @@ describe("motor pipeline (fatia 6): a concordância (\"aham\", \"sim\") não cor
     expect(log.events.filter((event) => event.startsWith("turn ended"))).toEqual(["turn ended (transcript)"]);
     expect(brain?.requests.length).toBe(1);
     await session.close();
+  });
+});
+
+describe("motor pipeline: as três falas do motor no idioma do agente (DESA-517)", () => {
+  // O texto entregue à voz simulada: o `push` de cada fala, que é o que a voz lê.
+  const pushed = (voice: ReturnType<typeof countedVoice>): string[] => voice.log.filter((line) => line.startsWith("push"));
+
+  for (const [language, spoken] of [["en-US", "en"], ["es-MX", "es"], ["pt-BR", "pt-BR"], ["fr-FR", "pt-BR"]] as const) {
+    it(`${language}: a fala de falha e a de transferência ficam prontas em ${spoken}, e é ela que toca na queda`, async () => {
+      brain = await startFakeBrain();
+      for (const [transferOnFailure, table] of [[false, PIPELINE_FAILURE_SPEECH], [true, PIPELINE_TRANSFER_SPEECH]] as const) {
+        const voice = countedVoice();
+        const { session, log } = await open(piecesOf(voice.synthesizer, [{ afterAudioMs: 20, fail: "o serviço caiu" }]), { transferOnFailure }, new FixedSpeechCache(), { ...config, language });
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(pushed(voice)).toEqual([`push 1 ${JSON.stringify(table[spoken])} flush`]);
+        speak(session, 20);
+        await until(() => log.events.includes("closed failed"), "o fim");
+        expect(log.events).toContain(`agent: ${table[spoken]}`);
+      }
+    });
+
+    it(`${language}: o cérebro que falha uma vez pede para repetir em ${spoken}`, async () => {
+      brain = await startFakeBrain();
+      const voice = countedVoice();
+      brain.reply({ status: 500, body: "{}" });
+      const { session, log } = await open(piecesOf(voice.synthesizer, [{ afterAudioMs: 20, text: "Hi.", final: true }]), {}, new FixedSpeechCache(), { ...config, language });
+      speak(session, 20);
+      await until(() => log.events.includes(`agent: ${PIPELINE_BRAIN_RETRY_SPEECH[spoken]}`), "o pedido de repetir");
+      expect(pushed(voice).some((line) => line.includes(JSON.stringify(PIPELINE_BRAIN_RETRY_SPEECH[spoken])))).toBe(true);
+      await session.close();
+    });
+  }
+
+  it("o pt-BR das três é o de sempre, byte a byte", () => {
+    expect(PIPELINE_FAILURE_SPEECH["pt-BR"]).toBe("Estou com um problema técnico e não vou conseguir continuar. Se puder, ligue de novo em alguns minutos. Obrigado.");
+    expect(PIPELINE_TRANSFER_SPEECH["pt-BR"]).toBe("Estou com um problema técnico e não vou conseguir continuar. Vou transferir você para uma pessoa da equipe. Um instante, por favor.");
+    expect(PIPELINE_BRAIN_RETRY_SPEECH["pt-BR"]).toBe("Desculpe, não consegui responder agora. Pode repetir, por favor?");
   });
 });

@@ -597,7 +597,7 @@ describe("guarda contra o silêncio (antipadrão 15)", { timeout: 120_000 }, () 
 
     harness.clock.advance(AFTER_CLOSE_MS);
     expect(harness.timers.fire(AFTER_CLOSE_MS)).toBe(1);
-    expect(manual.said).toEqual([ASK_TO_REPEAT]);
+    expect(manual.said).toEqual([ASK_TO_REPEAT["pt-BR"]]);
     await waitFor(async () => (await kindsOf(app, callId)).filter((kind) => kind === "caller_unanswered").length === 2, "the guard events");
     const guardEvents = (await eventsOf(app, callId)).filter((event) => event.kind === "caller_unanswered");
     expect(guardEvents.map((event) => event.payload)).toEqual([
@@ -685,15 +685,15 @@ describe("ainda está aí? (item 9 da segunda leva Vapi)", { timeout: 120_000 },
     expect(harness.timers.held()).toContain(20 + IDLE_FIRST_MS);
     harness.clock.advance(20 + IDLE_FIRST_MS);
     expect(harness.timers.fire(20 + IDLE_FIRST_MS)).toBe(1);
-    expect(manual.said).toEqual([IDLE_ASK]);
+    expect(manual.said).toEqual([IDLE_ASK["pt-BR"]]);
 
     harness.clock.advance(IDLE_SECOND_MS);
     expect(harness.timers.fire(IDLE_SECOND_MS)).toBe(1);
-    expect(manual.said).toEqual([IDLE_ASK, IDLE_ASK_AGAIN]);
+    expect(manual.said).toEqual([IDLE_ASK["pt-BR"], IDLE_ASK_AGAIN["pt-BR"]]);
 
     harness.clock.advance(IDLE_END_MS);
     expect(harness.timers.fire(IDLE_END_MS)).toBe(1);
-    expect(manual.said).toEqual([IDLE_ASK, IDLE_ASK_AGAIN, IDLE_FAREWELL]);
+    expect(manual.said).toEqual([IDLE_ASK["pt-BR"], IDLE_ASK_AGAIN["pt-BR"], IDLE_FAREWELL["pt-BR"]]);
 
     // A despedida toca, e a ligação cai depois dela.
     expect(harness.timers.fire(6000)).toBe(1);
@@ -723,8 +723,8 @@ describe("ainda está aí? (item 9 da segunda leva Vapi)", { timeout: 120_000 },
     expect(harness.timers.held()).not.toContain(20 + IDLE_FIRST_MS);
     harness.clock.advance(40_000);
     for (let round = 0; round < 3; round++) for (const delay of new Set(harness.timers.held())) if (delay <= 40_000) harness.timers.fire(delay);
-    expect(manual.said).not.toContain(IDLE_ASK);
-    expect(manual.said).not.toContain(IDLE_FAREWELL);
+    expect(manual.said).not.toContain(IDLE_ASK["pt-BR"]);
+    expect(manual.said).not.toContain(IDLE_FAREWELL["pt-BR"]);
     expect(await kindsOf(app, callId)).not.toContain("caller_idle");
     expect((await callOf(app, callId)).status).toBe("in_progress");
 
@@ -742,7 +742,7 @@ describe("ainda está aí? (item 9 da segunda leva Vapi)", { timeout: 120_000 },
     manual.emit("audio", Buffer.alloc(320));
     harness.clock.advance(20 + IDLE_FIRST_MS);
     harness.timers.fire(20 + IDLE_FIRST_MS);
-    expect(manual.said).toEqual([IDLE_ASK]);
+    expect(manual.said).toEqual([IDLE_ASK["pt-BR"]]);
     // Início de fala sem texto: a pessoa está na linha. O segundo lembrete não vem.
     manual.emit("callerActivity", { words: false });
     expect(harness.timers.held()).not.toContain(IDLE_SECOND_MS);
@@ -762,7 +762,7 @@ describe("ainda está aí? (item 9 da segunda leva Vapi)", { timeout: 120_000 },
     manual.emit("audio", Buffer.alloc(320));
     harness.clock.advance(20 + IDLE_FIRST_MS);
     expect(harness.timers.fire(20 + IDLE_FIRST_MS)).toBe(1);
-    expect(manual.said).toEqual([IDLE_ASK]);
+    expect(manual.said).toEqual([IDLE_ASK["pt-BR"]]);
     // O lembrete começa a tocar (1 s), e quem ligou fala por cima: só o `interrupted`, sem `callerActivity`.
     manual.emit("audio", Buffer.alloc(320 * 50));
     expect(harness.timers.held()).toContain(1000 + IDLE_SECOND_MS);
@@ -775,8 +775,8 @@ describe("ainda está aí? (item 9 da segunda leva Vapi)", { timeout: 120_000 },
     manual.emit("audio", Buffer.alloc(320));
     harness.clock.advance(20 + IDLE_FIRST_MS);
     expect(harness.timers.fire(20 + IDLE_FIRST_MS)).toBe(1);
-    expect(manual.said).toEqual([IDLE_ASK, IDLE_ASK]);
-    expect(manual.said).not.toContain(IDLE_ASK_AGAIN);
+    expect(manual.said).toEqual([IDLE_ASK["pt-BR"], IDLE_ASK["pt-BR"]]);
+    expect(manual.said).not.toContain(IDLE_ASK_AGAIN["pt-BR"]);
     await waitFor(async () => (await kindsOf(app, callId)).filter((kind) => kind === "caller_idle").length === 2, "the second caller_idle");
     const events = await eventsOf(app, callId);
     expect(events.filter((event) => event.kind === "caller_idle").map((event) => event.payload)).toEqual([
@@ -804,7 +804,7 @@ describe("ainda está aí? (item 9 da segunda leva Vapi)", { timeout: 120_000 },
     for (const delay of new Set(harness.timers.held())) if (delay <= 40_000) harness.timers.fire(delay);
     // Só a frase da própria ferramenta ("um instante"), dita antes do silêncio.
     expect(manual.said).toEqual(toolSaid);
-    expect(manual.said).not.toContain(IDLE_ASK);
+    expect(manual.said).not.toContain(IDLE_ASK["pt-BR"]);
     expect(await kindsOf(app, callId)).not.toContain("caller_idle");
     expect((await callOf(app, callId)).status).toBe("in_progress");
 
@@ -967,7 +967,7 @@ describe("latência por turno (item 6 da segunda leva Vapi)", { timeout: 120_000
     guardCloses(manual, harness.clock, harness.timers);
     harness.clock.advance(AFTER_CLOSE_MS);
     expect(harness.timers.fire(AFTER_CLOSE_MS)).toBe(1);
-    expect(manual.said).toEqual([ASK_TO_REPEAT]);
+    expect(manual.said).toEqual([ASK_TO_REPEAT["pt-BR"]]);
     answer(manual);
     transport.callerHangup();
     await session.done;
@@ -1003,7 +1003,7 @@ describe("latência por turno (item 6 da segunda leva Vapi)", { timeout: 120_000
     manual.emit("callerTurnEnded", { source: "vad" });
     harness.clock.advance(AFTER_CLOSE_MS);
     expect(harness.timers.fire(AFTER_CLOSE_MS)).toBe(1);
-    expect(manual.said).toEqual([ASK_TO_REPEAT]);
+    expect(manual.said).toEqual([ASK_TO_REPEAT["pt-BR"]]);
     answer(manual);
     harness.clock.advance(5000);
     turn(manual, harness.clock, 700);
@@ -1388,7 +1388,7 @@ describe("guarda contra o silêncio com o motor OpenAI (servidor falso)", { time
     expect(harness.timers.fire(AFTER_CLOSE_MS)).toBe(1);
     // O agente não fica calado: a primeira mensagem de commit ou de resposta é o pedido para repetir.
     const first = await fake.waitFor((message) => message.type === "input_audio_buffer.commit" || message.type === "response.create");
-    expect(first).toMatchObject({ type: "response.create", response: { instructions: expect.stringContaining(ASK_TO_REPEAT) } });
+    expect(first).toMatchObject({ type: "response.create", response: { instructions: expect.stringContaining(ASK_TO_REPEAT["pt-BR"]) } });
     await waitFor(async () => (await kindsOf(app, callId)).filter((kind) => kind === "caller_unanswered").length === 2, "the guard events");
     const guardEvents = (await eventsOf(app, callId)).filter((event) => event.kind === "caller_unanswered");
     expect(guardEvents.map((event) => event.payload)).toEqual([
