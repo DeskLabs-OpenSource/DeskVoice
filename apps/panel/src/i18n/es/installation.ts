@@ -66,7 +66,7 @@ const installation: InstallationDictionary = {
     limitsOutboundReturnsOff: "Las llamadas salientes de esta organización vuelven como ella las dejó: desactivadas.",
     limitsSpendCap: "Tope de gasto del mes, en dólares",
     limitsSpendCapSpent: "Gastado este mes: {spent}.",
-    limitsSpendCapApprox: "Aproximado: incluye costo estimado y no incluye lo que no se pudo medir. En el tope, toda llamada nueva se rechaza (la que está en curso sigue).",
+    limitsSpendCapApprox: "Aproximado: incluye costo estimado y no incluye lo que no se pudo medir. En el tope, toda llamada nueva se rechaza (la que está en curso sigue), y el desenlace, el análisis y la transcripción de la grabación ya no se piden al proveedor.",
     limitsSpendCapInvalid: "El tope de gasto del mes debe ser un valor en dólares, como 50 o 49.90, o quedar vacío.",
     defaultsTitle: "Valores por defecto para organizaciones nuevas",
     defaultsLead: "Los límites, el huso horario y el idioma con que nace cada organización nueva. Vale solo para las organizaciones creadas de aquí en adelante: las que ya existen siguen como están.",

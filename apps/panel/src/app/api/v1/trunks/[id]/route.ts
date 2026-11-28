@@ -1,4 +1,4 @@
-import { encryptSecret } from "@deskvoice/core";
+import { decryptSecret, encryptSecret, trunkEntersGroups } from "@deskvoice/core";
 import { ApiError, handle, notFound } from "../../../../../server/context";
 import { TRUNK_COLUMNS, trunkPatch } from "../../../../../server/shapes";
 import { applyTrunks, requireIpModeForAddresses, requireNumericInbound, requireOverlapConfirmed } from "../store";
@@ -41,11 +41,31 @@ export const PATCH = handle(
     }
     // Por último, depois de toda recusa que não depende da faixa: a confirmação grava o evento de
     // que a gravação seguiu, e nada depois dela pode recusar a gravação.
-    // Só confere quem mexe no que agrupa as linhas: o endereço, os extras ou o modo. Trocar o nome
-    // de uma linha que já está num grupo misto não pergunta nada.
+    // Confere a edição que faz a linha passar a entrar no agrupamento (a senha que faltava, o
+    // usuário, o destino de saída válido, qualquer campo que `trunkEntersGroups` olhe) e a que mexe
+    // no que agrupa uma linha que já está nele: o endereço, os extras ou o modo. A linha que fica
+    // de fora, ou sai, não tira outra do ar. Trocar o nome de uma linha que já está num grupo misto
+    // não pergunta nada.
+    const plain = (enc: string | null): string | null | undefined => {
+      try {
+        return enc === null ? null : decryptSecret(enc, deps.secretKey);
+      } catch {
+        return undefined; // Ilegível: o processo de voz deixa a linha de fora.
+      }
+    };
+    const enters = (trunk: typeof merged, password: string | null | undefined): boolean =>
+      password !== undefined && trunkEntersGroups({ ...trunk, matchExtra: trunk.matchExtra ?? [], outboundHost: trunk.outboundHost ?? null, password });
+    const nextPassword = password ?? plain(secretEnc);
     const sameExtras = (merged.matchExtra ?? []).join("\n") === (current.matchExtra ?? []).join("\n");
-    if (merged.host !== current.host || merged.authMode !== current.authMode || !sameExtras) {
-      await requireOverlapConfirmed(deps, q.organizationId, session, { id: params.id, host: merged.host, authMode: merged.authMode, matchExtra: merged.matchExtra }, confirmOverlap);
+    const sameGrouping = merged.host === current.host && merged.authMode === current.authMode && sameExtras;
+    if (enters(merged, nextPassword) && (!sameGrouping || !enters(current, plain(current.secretEnc)))) {
+      await requireOverlapConfirmed(
+        deps,
+        q.organizationId,
+        session,
+        { id: params.id, host: merged.host, authMode: merged.authMode, matchExtra: merged.matchExtra, username: merged.username, password: nextPassword ?? null, outboundHost: merged.outboundHost ?? null },
+        confirmOverlap,
+      );
     }
     const next = { ...merged, secretEnc };
     // Linha alterada volta a "não verificada": o teste anterior valia para a configuração antiga.
