@@ -5,6 +5,7 @@ import { fakeMcp, tool, type FakeMcp } from "../../../../../../packages/tools/te
 import { call, createOrganization, createUser, insert, startPanel, type Result } from "../../../../test/kit";
 import { POST as discover } from "./mcp-servers/discover/route";
 import { GET as list } from "./mcp-servers/route";
+import { lookTools, saveBody, saveServer } from "../../../server/mcp-servers";
 import { DELETE as remove, PUT as save } from "./mcp-servers/[slug]/route";
 import { POST as refresh } from "./mcp-servers/[slug]/refresh/route";
 
@@ -187,6 +188,67 @@ describe("as rotas dos servidores MCP", () => {
     expect(after).toHaveLength(1);
     expect(after[0]).toMatchObject({ slug: "erp", label: "ERP", url: URL_A });
     expect(decryptSecret(after[0]?.secret as string, panel.deps.secretKey)).toBe(SECRET);
+  });
+
+  describe("duas gravações ao mesmo tempo na mesma organização", () => {
+    /** Alguém do banco espera a transação de `pid` terminar. */
+    async function someoneWaitsFor(org: string, pid: number, timeoutMs = 5000): Promise<boolean> {
+      const deadline = performance.now() + timeoutMs;
+      while (performance.now() < deadline) {
+        const waiting = await withOrg(panel.app, org, (q) => q.one<{ n: number }>("select count(*)::int as n from pg_stat_activity where $1 = any(pg_blocking_pids(pid))", [pid]));
+        if ((waiting?.n ?? 0) > 0) return true;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return false;
+    }
+
+    /**
+     * A primeira gravação grava e fica com a transação aberta; só então a segunda sai, pela rota. A
+     * primeira só termina depois que a segunda espera por ela no banco.
+     */
+    async function race(org: string, cookie: string, first: string, second: string) {
+      const looked = { secret: SECRET, list: await lookTools(panel.deps, { slug: first, url: URL_A, secret: SECRET }) };
+      let release = (): void => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let opened = (_pid: number): void => undefined;
+      const pid = new Promise<number>((resolve) => {
+        opened = resolve;
+      });
+      const one = withOrg(panel.app, org, async (q) => {
+        const saved = await saveServer(q, panel.deps, first, saveBody.parse(body({ create: true })), looked);
+        opened((await q.one<{ pid: number }>("select pg_backend_pid() as pid"))?.pid ?? 0);
+        await held;
+        return saved;
+      });
+      const firstPid = await pid;
+      const other = call(save, { method: "PUT", cookie, params: { slug: second }, body: body({ create: true, label: "Segundo" }) });
+      const waited = await someoneWaitsFor(org, firstPid);
+      release();
+      return { waited, first: await one, second: await other };
+    }
+
+    it("com o mesmo slug, a segunda espera a primeira e recebe o 409, e a primeira fica", async () => {
+      const s = await scene("corrida mesmo");
+      const { waited, second } = await race(s.org, s.admin.cookie, "erp", "erp");
+      expect(waited).toBe(true);
+      expect([second.status, second.code]).toEqual([409, "mcp_server_exists"]);
+      const after = (await stored(s.org))?.value as Array<Record<string, unknown>>;
+      expect(after.map((server) => [server.slug, server.label])).toEqual([["erp", "ERP"]]);
+    });
+
+    it("com slugs diferentes, as duas ficam gravadas", async () => {
+      const s = await scene("corrida outro");
+      const { waited, second } = await race(s.org, s.admin.cookie, "erp", "loja");
+      expect(waited).toBe(true);
+      expect(second.status).toBe(200);
+      const after = (await stored(s.org))?.value as Array<Record<string, unknown>>;
+      expect(after.map((server) => [server.slug, server.label])).toEqual([
+        ["erp", "ERP"],
+        ["loja", "Segundo"],
+      ]);
+    });
   });
 
   it("recusa a impressão digital que não bate com a busca, e nada muda", async () => {
