@@ -376,6 +376,7 @@ const timeline = {
     drop_follow_up_result: {
       whatsapp_sent: "A mensagem no WhatsApp para quem ligou saiu.",
       whatsapp_failed: "A mensagem no WhatsApp para quem ligou não saiu.",
+      whatsapp_do_not_call: "A mensagem no WhatsApp para quem ligou não saiu: o número entrou na lista de não ligar antes do envio.",
       call_back_placed: "A religação saiu (tentativa {attempt}).",
       call_back_refused: "A religação não saiu (tentativa {attempt}): {reason}.",
       call_back_expired: "A religação não saiu (tentativa {attempt}): o processo de voz não discou a tempo.",
