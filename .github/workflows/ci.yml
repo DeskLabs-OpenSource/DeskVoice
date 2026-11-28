@@ -93,7 +93,8 @@ jobs:
           persist-credentials: false
       # As tags `v*`, só a ponta de cada uma (o checkout é raso e não as traz), para a cerca
       # migrations-come-after-the-last-release comparar com a última versão publicada; sem elas a
-      # cerca pula. Repositório público: o fetch não precisa de credencial.
+      # cerca reprova no CI (fora dele, pula e diz o motivo). Repositório público: o fetch não precisa
+      # de credencial.
       - name: Buscar as tags
         run: git fetch --no-recurse-submodules --depth=1 origin '+refs/tags/v*:refs/tags/v*'
       - uses: ./.github/actions/setup
