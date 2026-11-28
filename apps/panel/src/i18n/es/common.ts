@@ -117,6 +117,7 @@ const common: CommonDictionary = {
     approval_expired: "El plazo para responder terminó. El agente siguió con el valor por defecto del pedido.",
     purpose_required: "Para activarlas, declara la finalidad y la base legal de las llamadas.",
     password_required: "Al cambiar el proveedor o el usuario, escribe la contraseña de nuevo.",
+    deskcomm_crm_not_configured: "Guarda antes el conector DeskcommCRM con la dirección del CRM.",
     token_required: "Al cambiar la dirección o el tipo del conector, escribe el token de nuevo.",
     endpoint_required: "La clave de la clasificación pertenece a un endpoint: escribe también el endpoint.",
     endpoint_key_required: "Al cambiar el endpoint de la clasificación, escribe su clave de nuevo.",

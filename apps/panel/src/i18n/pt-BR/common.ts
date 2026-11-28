@@ -118,6 +118,7 @@ const common = {
     approval_expired: "O prazo para responder acabou. O agente seguiu com o padrão do pedido.",
     purpose_required: "Para ligar, declare a finalidade e a base legal das ligações.",
     password_required: "Ao mudar o provedor ou o usuário, informe a senha de novo.",
+    deskcomm_crm_not_configured: "Salve antes o conector DeskcommCRM com o endereço do CRM.",
     token_required: "Ao mudar o endereço ou o tipo do conector, informe o token de novo.",
     endpoint_required: "A chave da classificação pertence a um endpoint: informe o endpoint também.",
     endpoint_key_required: "Ao mudar o endpoint da classificação, informe a chave dele de novo.",
