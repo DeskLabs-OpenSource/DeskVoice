@@ -50,6 +50,7 @@ describe("gerador de pjsip_trunks.conf", { timeout: 60_000 }, () => {
 type=endpoint
 transport=transport-udp
 context=from-trunk
+identify_by=ip
 disallow=all
 allow=ulaw
 allow=alaw
@@ -84,6 +85,14 @@ endpoint=trunk-${A}
 retry_interval=60
 `,
     });
+  });
+
+  it("todo endpoint de linha, nos dois modos, é reconhecido só pelo endereço ou pelo line do registro", () => {
+    const { conf, emitted } = renderTrunksConf([register, byIp, { ...register, id: C, host: "198.51.100.40", organizationId: ORG2 }]);
+    expect(emitted).toEqual([A, B, C]);
+    const endpoints = conf.split("\n\n").filter((block) => /^\[trunk-[0-9a-f-]{36}\]\ntype=endpoint\n/.test(block));
+    expect(endpoints).toHaveLength(3);
+    for (const block of endpoints) expect(block.split("\n").filter((line) => line.startsWith("identify_by="))).toEqual(["identify_by=ip"]);
   });
 
   it("modo register com IP exclusivo: line no registro e identify pelo endereço", () => {

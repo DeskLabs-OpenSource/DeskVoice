@@ -118,6 +118,10 @@ function renderTrunk(trunk: TrunkConfig, inbound: Inbound, identify: boolean, pe
     "type=endpoint",
     "transport=transport-udp",
     "context=from-trunk",
+    // Quem chega é reconhecido pelo `line` do registro ou pelo `identify` do endereço. O padrão do
+    // Asterisk (`username,ip`) também reconheceria pelo usuário do From, que não é segredo.
+    // O identificador `line` não lê esta opção: ele continua valendo.
+    "identify_by=ip",
     "disallow=all",
     "allow=ulaw",
     "allow=alaw",

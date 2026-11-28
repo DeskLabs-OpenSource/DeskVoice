@@ -26,8 +26,8 @@ import {
   type SessionHarness,
 } from "./testing/db";
 import { waitFor } from "./testing/helpers";
-import { IDLE_FIRST_MS } from "./caller-idle";
 import { AFTER_CLOSE_MS, AFTER_WORDS_MS, ASK_TO_REPEAT, WITHOUT_WORDS_MS } from "./silence-guard";
+import { IDLE_ASK, IDLE_FIRST_MS } from "./caller-idle";
 
 const { app, owner } = openTestDbs();
 let harness: SessionHarness | undefined;
@@ -868,5 +868,68 @@ describe("as falas da guarda depois da passagem saem no idioma de quem recebe (D
     expect(first.said).toEqual([]);
     transport.callerHangup();
     await session.done;
+  });
+});
+
+// A chave do "ainda está aí?" é de cada agente (Vapi · fatia 9, decisão B; acompanhamento DESA-392): na
+// passagem, vale a do agente que está falando, e a guarda do anterior para.
+describe("o \"ainda está aí?\" na passagem, com as chaves diferentes", { timeout: 120_000 }, () => {
+  async function passagem(label: string, firstGuard: boolean, secondGuard: boolean) {
+    const first = manualEngine({ id: "first", keyless: true });
+    const second = manualEngine({ id: "second", keyless: true });
+    const { ids, call, harness: h } = await team(
+      label,
+      { Recepção: { engine: "first", callerIdleGuard: firstGuard }, Agendamento: { engine: "second", callerIdleGuard: secondGuard } },
+      [first.engine, second.engine],
+    );
+    await setHandoffTargets(app, ids.Recepção ?? "", [ids.Agendamento ?? ""]);
+    const { callId, transport, session } = await call("Recepção");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("call_answered"), "the call to be answered");
+    // O primeiro fala (com a chave dele ligada, a guarda dele arma) e passa a ligação.
+    first.emit("audio", Buffer.alloc(320));
+    expect(h.timers.held().includes(20 + IDLE_FIRST_MS)).toBe(firstGuard);
+    first.emit("toolCall", { id: "t1", name: "transfer_to_agent", args: { agent: "Agendamento", reason: "agenda", summary: "Quer marcar." } });
+    await waitFor(async () => (await kindsOf(app, callId)).includes("agent_handoff"), "the handoff");
+    // O resultado da passagem fica na linha do tempo (a sessão do primeiro já fechou): a ferramenta acabou.
+    await waitFor(async () => (await kindsOf(app, callId)).includes("tool_result"), "the handoff tool result");
+    await new Promise((resolve) => setImmediate(resolve));
+    return { callId, transport, session, first, second, h };
+  }
+
+  /** Avança 40 s e dispara, em rodadas, o que vencer até lá. */
+  function quarentaSegundos(h: SessionHarness): void {
+    h.clock.advance(40_000);
+    for (let round = 0; round < 6; round++) for (const delay of new Set(h.timers.held())) if (delay <= 40_000) h.timers.fire(delay);
+  }
+
+  it("o primeiro com a chave ligada e o segundo com ela desligada: a guarda do primeiro para na passagem, e 40 s calado com o segundo não dão caller_idle", async () => {
+    const { callId, transport, session, first, second, h } = await passagem("handoff-idle-on-off", true, false);
+    // Nada armado depois da passagem, nem pelo fim da ferramenta do primeiro.
+    expect(h.timers.held()).not.toContain(IDLE_FIRST_MS);
+    second.emit("audio", Buffer.alloc(320));
+    expect(h.timers.held()).not.toContain(20 + IDLE_FIRST_MS);
+    quarentaSegundos(h);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(first.said).not.toContain(IDLE_ASK["pt-BR"]);
+    expect(second.said).not.toContain(IDLE_ASK["pt-BR"]);
+    expect(await kindsOf(app, callId)).not.toContain("caller_idle");
+    expect((await callOf(app, callId)).status).toBe("in_progress");
+    transport.callerHangup();
+    expect(await session.done).toMatchObject({ endReason: "caller_hangup" });
+  });
+
+  it("o primeiro com a chave desligada e o segundo com ela ligada: a guarda arma com a fala do segundo e pergunta pela voz dele", async () => {
+    const { callId, transport, session, first, second, h } = await passagem("handoff-idle-off-on", false, true);
+    second.emit("audio", Buffer.alloc(320));
+    expect(h.timers.held()).toContain(20 + IDLE_FIRST_MS);
+    h.clock.advance(20 + IDLE_FIRST_MS);
+    expect(h.timers.fire(20 + IDLE_FIRST_MS)).toBe(1);
+    // A pergunta sai pela sessão do segundo, e só por ela.
+    expect(second.said.filter((text) => text === IDLE_ASK["pt-BR"])).toHaveLength(1);
+    await waitFor(async () => (await kindsOf(app, callId)).includes("caller_idle"), "the caller_idle event");
+    expect(await payloadsOf(callId, "caller_idle")).toEqual([{ action: "asked", silentMs: IDLE_FIRST_MS }]);
+    expect(first.closed).toBe(1);
+    transport.callerHangup();
+    expect(await session.done).toMatchObject({ endReason: "caller_hangup" });
   });
 });

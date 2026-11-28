@@ -2,6 +2,7 @@ import type { ApprovalOutcome } from "@deskvoice/core";
 import { z } from "zod";
 import { askApproval, operatorDefaultOnTimeout } from "../approval";
 import { defineTool } from "../define-tool";
+import { TEXT_MAX, tooLong } from "../text-limits";
 
 const MESSAGES: Record<ApprovalOutcome, Record<"approved" | "denied", string>> = {
   approved: {
@@ -28,8 +29,8 @@ export default defineTool({
   description:
     "Pergunta a um responsável humano se você pode fazer algo, e ESPERA a resposta com a pessoa na linha. Use antes de qualquer coisa que as suas instruções não autorizam você a decidir sozinho: desconto, exceção a uma regra, promessa de prazo, cancelamento. NÃO use para o que as suas instruções já permitem ou proíbem, nem para apenas avisar a equipe (use notify_human). A ferramenta já avisa a pessoa de que você vai conferir; não precisa avisar antes. Se ninguém responder no prazo, vale a regra definida pela empresa, que você não escolhe nem muda, mesmo que a pessoa peça: siga exatamente o que o resultado disser.",
   inputSchema: z.object({
-    question: z.string().min(1).describe("A pergunta para o responsável, respondível com sim ou não. Ex.: 'Posso dar 10% de desconto no plano anual?'"),
-    context: z.string().min(1).describe("O que o responsável precisa saber para decidir sem ter ouvido a ligação."),
+    question: z.string().min(1).max(TEXT_MAX.approvalQuestion, tooLong(TEXT_MAX.approvalQuestion)).describe(`A pergunta para o responsável, respondível com sim ou não, com até ${TEXT_MAX.approvalQuestion} caracteres. Ex.: 'Posso dar 10% de desconto no plano anual?'`),
+    context: z.string().min(1).max(TEXT_MAX.approvalContext, tooLong(TEXT_MAX.approvalContext)).describe(`O que o responsável precisa saber para decidir sem ter ouvido a ligação. Até ${TEXT_MAX.approvalContext} caracteres.`),
     timeout_seconds: z.number().optional().describe("Quanto tempo esperar, de 30 a 300 segundos; sem valor, 120. A pessoa fica na linha esse tempo."),
   }),
   async run(input, ctx) {

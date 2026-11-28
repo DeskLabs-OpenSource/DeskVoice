@@ -8,7 +8,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { openTestDbs } from "../../../packages/core/test/helpers";
 import type { AudioSocketCloseReason, AudioSocketConnection } from "./audiosocket";
 import { AsteriskCalls } from "./asterisk-transport";
-import { IDLE_ASK, IDLE_END_MS, IDLE_FIRST_MS, IDLE_SECOND_MS } from "./caller-idle";
+import { IDLE_ASK, IDLE_ASK_AGAIN, IDLE_END_MS, IDLE_FAREWELL, IDLE_FIRST_MS, IDLE_SECOND_MS } from "./caller-idle";
 import { startCallSession } from "./call-session";
 import { callOf, createAgent, createCall, createOrganization, createTrunk, eventsOf, fakeAri, kindsOf, manualEngine, sessionHarness, type SessionHarness } from "./testing/db";
 import { waitFor } from "./testing/helpers";
@@ -30,10 +30,14 @@ const VOLTA = "3b9d6c1e-2f4a-4c8b-9e7d-1a0f5c3b2d64";
 /** O toque: mais que os 28 s da guarda (10 + 10 + 8), menos que os 45 s do `Dial`. */
 const TOQUE_MS = 40_000;
 
-function conexao(id: string): AudioSocketConnection & { closedLocally: boolean } {
+function conexao(id: string): AudioSocketConnection & { closedLocally: boolean; hangup(): void } {
   const closes: Array<(reason: AudioSocketCloseReason) => void> = [];
-  const connection: AudioSocketConnection & { closedLocally: boolean } = {
+  const connection: AudioSocketConnection & { closedLocally: boolean; hangup(): void } = {
     closedLocally: false,
+    // Quem ligou desligou: o AudioSocket fecha do outro lado.
+    hangup: () => {
+      for (const handler of closes.splice(0)) handler("hangup");
+    },
     id,
     onAudio: () => undefined,
     onDtmf: () => undefined,
@@ -51,9 +55,9 @@ function conexao(id: string): AudioSocketConnection & { closedLocally: boolean }
   return connection;
 }
 
-async function cenario(label: string) {
+async function cenario(label: string, options: { callerIdleGuard?: boolean } = {}) {
   const organizationId = await createOrganization(app, label);
-  const agentId = await createAgent(app, organizationId, { engine: "manual", greeting: "Bom dia.", transferTo: DESTINO, tools: ["transfer_to_human"] });
+  const agentId = await createAgent(app, organizationId, { engine: "manual", greeting: "Bom dia.", transferTo: DESTINO, tools: ["transfer_to_human"], ...options });
   const trunkId = await createTrunk(app, organizationId);
   await harness?.approvals.close();
   const manual = manualEngine({ keyless: true });
@@ -134,5 +138,43 @@ describe("transferência com volta e o \"ainda está aí?\"", { timeout: 120_000
     expect(kinds.indexOf("caller_idle")).toBeGreaterThan(kinds.indexOf("transfer_returned"));
     expect(kinds.filter((kind) => kind === "call_ended")).toHaveLength(1);
     expect(await callOf(app, callId)).toMatchObject({ status: "completed", end_reason: "caller_silent" });
+  });
+
+  it("com a chave do agente desligada: no trecho de volta o relógio do silêncio não volta a contar, e 40 s calado não dão caller_idle nem caller_silent", async () => {
+    const { callId, channelId, calls, audio, session, manual, harness } = await cenario("idle-off-return", { callerIdleGuard: false });
+    let done = false;
+    void session.done.then(() => (done = true));
+
+    manual.emit("audio", Buffer.alloc(320));
+    manual.emit("toolCall", { id: "t-transfer", name: "transfer_to_human", args: { reason: "quer falar com o financeiro", summary: "Segunda via do boleto." } });
+    await waitFor(() => audio.closedLocally, "the audio to close for the transfer");
+    await calls.afterAudio(channelId);
+    await waitFor(async () => (await kindsOf(app, callId)).includes("transfer_started"), "the transfer to start");
+    await new Promise((resolve) => setImmediate(resolve));
+    passa(harness.timers, harness.clock, TOQUE_MS);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await calls.transferEnded(channelId, "NOANSWER");
+    const volta = conexao(VOLTA);
+    expect(calls.resume(volta)).toBe(true);
+    await waitFor(() => manual.configs.length === 2, "the return leg to open");
+    await waitFor(async () => (await kindsOf(app, callId)).includes("transfer_returned"), "the return to be recorded");
+
+    // O agente fala no trecho de volta; a pessoa fica calada por 40 s. A chave do agente vale no trecho
+    // de volta também: nada é armado, nada é dito, e a ligação segue.
+    manual.emitOn(1, "audio", Buffer.alloc(320));
+    expect(harness.timers.held()).not.toContain(20 + IDLE_FIRST_MS);
+    passa(harness.timers, harness.clock, TOQUE_MS);
+    await new Promise((resolve) => setImmediate(resolve));
+    for (const text of [IDLE_ASK, IDLE_ASK_AGAIN, IDLE_FAREWELL].flatMap((byLanguage) => Object.values(byLanguage))) expect(manual.said).not.toContain(text);
+    expect(await kindsOf(app, callId)).not.toContain("caller_idle");
+    expect(await kindsOf(app, callId)).not.toContain("call_ended");
+    expect(await callOf(app, callId)).toMatchObject({ status: "in_progress", end_reason: null });
+    expect(done).toBe(false);
+
+    // Quem ligou desliga: o fim é o dele, e não o do silêncio.
+    volta.hangup();
+    expect(await session.done).toMatchObject({ endReason: "caller_hangup" });
+    expect(await kindsOf(app, callId)).not.toContain("caller_idle");
   });
 });

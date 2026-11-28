@@ -62,14 +62,27 @@ export async function withCallerContext(ctx: ToolContext, body: string): Promise
   return { panel: append(callerContextLine(history, "panel")), whatsapp: append(callerContextLine(history, "whatsapp")) };
 }
 
+/** O que `notifyHumans` fez: os canais usados e os que a chamada simulada segurou. */
+export interface NotifyOutcome {
+  channels: string[];
+  /**
+   * Canais que teriam saído e não saíram porque a chamada é simulada (`channel = 'simulated'`).
+   * Vazio fora da simulação. A linha do tempo mostra o que teria saído.
+   */
+  withheld: string[];
+}
+
 /**
  * Cria os avisos para os humanos da organização e enfileira a entrega de cada um. O painel recebe
  * sempre; o WhatsApp, quando pedido, se houver conector e alguém com número cadastrado.
- * Devolve os canais usados.
+ *
+ * Na chamada simulada nada sai da instalação: o aviso do painel é criado, e o do WhatsApp não,
+ * nem é enfileirado. Ele volta em `withheld`, para a linha do tempo dizer o que teria saído.
  */
-export async function notifyHumans(ctx: ToolContext, body: NotificationBody, options: { whatsapp: boolean }): Promise<string[]> {
+export async function notifyHumans(ctx: ToolContext, body: NotificationBody, options: { whatsapp: boolean }): Promise<NotifyOutcome> {
   const texts = typeof body === "string" ? { panel: body, whatsapp: body } : body;
   const targets: { channel: "panel" | "whatsapp"; target: string | null }[] = [{ channel: "panel", target: null }];
+  const withheld: string[] = [];
   if (options.whatsapp && (await hasWhatsAppConnector(ctx.q))) {
     const users = await ctx.q.many<{ whatsapp_e164: string }>(
       // Só quem está ativo: quem foi desativado saiu da equipe e não recebe mais dados de chamada.
@@ -77,7 +90,8 @@ export async function notifyHumans(ctx: ToolContext, body: NotificationBody, opt
       "select distinct whatsapp_e164 from users where organization_id = $1 and kind = 'member' and whatsapp_e164 is not null and disabled_at is null order by whatsapp_e164",
       [ctx.organizationId],
     );
-    for (const user of users) targets.push({ channel: "whatsapp", target: user.whatsapp_e164 });
+    if (users.length > 0 && (await isSimulatedCall(ctx))) withheld.push("whatsapp");
+    else for (const user of users) targets.push({ channel: "whatsapp", target: user.whatsapp_e164 });
   }
 
   for (const { channel, target } of targets) {
@@ -88,5 +102,11 @@ export async function notifyHumans(ctx: ToolContext, body: NotificationBody, opt
     if (!row) throw new Error(`Notification (${channel}) was not created`);
     await enqueueTask(ctx.q, { kind: "deliver_notification", payload: { notificationId: row.id }, callId: ctx.callId, runAt: ctx.clock.now() });
   }
-  return [...new Set(targets.map((entry) => entry.channel))];
+  return { channels: [...new Set(targets.map((entry) => entry.channel))], withheld };
+}
+
+/** A chamada é um teste da equipe (`channel = 'simulated'`). Chamada que não existe não é simulada. */
+async function isSimulatedCall(ctx: ToolContext): Promise<boolean> {
+  const call = await ctx.q.one<{ channel: string }>("select channel from calls where id = $1", [ctx.callId]);
+  return call?.channel === "simulated";
 }
