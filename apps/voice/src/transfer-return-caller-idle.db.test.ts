@@ -95,7 +95,7 @@ describe("transferência com volta e o \"ainda está aí?\"", { timeout: 120_000
 
     passa(harness.timers, harness.clock, TOQUE_MS);
     await new Promise((resolve) => setImmediate(resolve));
-    expect(manual.said).not.toContain(IDLE_ASK);
+    expect(manual.said).not.toContain(IDLE_ASK["pt-BR"]);
     expect(await kindsOf(app, callId)).not.toContain("caller_idle");
     expect(await kindsOf(app, callId)).not.toContain("call_ended");
     expect(await callOf(app, callId)).toMatchObject({ status: "in_progress" });
@@ -115,7 +115,7 @@ describe("transferência com volta e o \"ainda está aí?\"", { timeout: 120_000
     expect(harness.timers.held()).toContain(20 + IDLE_FIRST_MS);
     harness.clock.advance(20 + IDLE_FIRST_MS);
     expect(harness.timers.fire(20 + IDLE_FIRST_MS)).toBe(1);
-    expect(manual.said.filter((text) => text === IDLE_ASK)).toHaveLength(1);
+    expect(manual.said.filter((text) => text === IDLE_ASK["pt-BR"])).toHaveLength(1);
     harness.clock.advance(IDLE_SECOND_MS);
     expect(harness.timers.fire(IDLE_SECOND_MS)).toBe(1);
     harness.clock.advance(IDLE_END_MS);

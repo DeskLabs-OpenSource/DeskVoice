@@ -354,11 +354,33 @@ class CallEndedError extends Error {}
 // Tempo para a despedida ser gerada e chegar à fila de saída; o que estiver na fila ainda toca
 // até o fim antes de a ligação cair (`transport.hangup` espera).
 const FAREWELL_MS = 6000;
-const FAREWELL = {
-  maxDuration: "Esta ligação chegou ao tempo máximo e vou precisar encerrar. Se ainda precisar de algo, é só ligar de novo. Obrigado.",
-  costCeiling: "Preciso encerrar esta ligação agora. Se ainda precisar de algo, é só ligar de novo. Obrigado.",
-  costCeilingTransfer: "Vou passar você para uma pessoa da equipe continuar o atendimento. Um instante, por favor.",
+/**
+ * As despedidas que a sessão diz por conta própria, no idioma do agente do trecho (escolhido por
+ * `spokenLanguageOf`, como `HANDOFF_GREETINGS`): o motor pipeline entrega o texto à voz como veio
+ * (DESA-517). As do teto também vão prontas na abertura do pipeline (`fixedSpeech`), e por isso as
+ * duas pontas escolhem pelo mesmo `farewellFor`: idioma diferente seria uma fala nova, sintetizada e paga.
+ */
+export const FAREWELL: Readonly<Record<"maxDuration" | "costCeiling" | "costCeilingTransfer", Readonly<Record<SpokenLanguage, string>>>> = {
+  maxDuration: {
+    "pt-BR": "Esta ligação chegou ao tempo máximo e vou precisar encerrar. Se ainda precisar de algo, é só ligar de novo. Obrigado.",
+    en: "This call has reached its maximum length and I need to end it. If you still need anything, just call again. Thank you.",
+    es: "Esta llamada llegó al tiempo máximo y tengo que terminarla. Si todavía necesita algo, solo vuelva a llamar. Gracias.",
+  },
+  costCeiling: {
+    "pt-BR": "Preciso encerrar esta ligação agora. Se ainda precisar de algo, é só ligar de novo. Obrigado.",
+    en: "I need to end this call now. If you still need anything, just call again. Thank you.",
+    es: "Tengo que terminar esta llamada ahora. Si todavía necesita algo, solo vuelva a llamar. Gracias.",
+  },
+  costCeilingTransfer: {
+    "pt-BR": "Vou passar você para uma pessoa da equipe continuar o atendimento. Um instante, por favor.",
+    en: "I'm going to pass you to someone on the team to continue helping you. One moment, please.",
+    es: "Voy a pasarlo con una persona del equipo para continuar con su atención. Un momento, por favor.",
+  },
 };
+
+export function farewellFor(kind: keyof typeof FAREWELL, language: string): string {
+  return FAREWELL[kind][spokenLanguageOf(language)];
+}
 const CLOSING_MESSAGE = "A ligação está sendo encerrada. Não chame mais ferramentas.";
 const TOOL_CRASH_MESSAGE = "Não consegui concluir isso agora. Diga a quem está na linha que não foi possível concluir neste momento, e ofereça outra forma de ajudar.";
 
@@ -719,7 +741,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     if (!(ceiling > 0 && (beforeSpending || total >= ceiling)) || ending || wrappingUp || transferring) return undefined;
     const transferTo = currentTransferTo();
     wrapUp(
-      transferTo ? FAREWELL.costCeilingTransfer : FAREWELL.costCeiling,
+      farewellFor(transferTo ? "costCeilingTransfer" : "costCeiling", agent?.language ?? ""),
       transferTo ? { status: "transferred", endReason: "cost_ceiling", transferTo } : { status: "completed", endReason: "cost_ceiling" },
     );
     return { ceiling, transferTo };
@@ -1044,7 +1066,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   function scheduleDuration(): void {
     cancelDuration();
     const elapsedMs = answeredAt ? clock.now().getTime() - answeredAt.getTime() : 0;
-    cancelDuration = schedule(() => wrapUp(FAREWELL.maxDuration, { status: "completed", endReason: "max_duration" }), Math.max(0, durationLimitSeconds * 1000 - elapsedMs));
+    cancelDuration = schedule(() => wrapUp(farewellFor("maxDuration", agent?.language ?? ""), { status: "completed", endReason: "max_duration" }), Math.max(0, durationLimitSeconds * 1000 - elapsedMs));
   }
 
   const telephony: ToolContext["telephony"] = {
@@ -1440,7 +1462,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         organizationId,
         // A despedida que promete transferência só fica pronta quando o trecho transfere (a mesma regra):
         // sem número, o teto toca a outra, e as falas prontas não crescem (fatia 4, ponta da 3c-2).
-        fixedSpeech: transferOnFailure ? [FAREWELL.costCeiling, FAREWELL.costCeilingTransfer] : [FAREWELL.costCeiling],
+        fixedSpeech: transferOnFailure ? [farewellFor("costCeiling", row.language), farewellFor("costCeilingTransfer", row.language)] : [farewellFor("costCeiling", row.language)],
         ceiling: pipelineCeiling,
         clock,
         ...(transferOnFailure && { transferOnFailure }),
@@ -1546,6 +1568,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const silenceGuard = createSilenceGuard({
       clock,
       schedule,
+      // As falas da guarda saem no idioma do agente desta perna: na passagem, no do agente que recebe.
+      language: row.language,
       // A resposta forçada pela guarda e o pedido para repetir não entram na latência por turno: o
       // turno vai para `guardTurns`. Com `false`, o motor não mandou nada (o provedor já tinha fechado
       // a vez, só está lento), e o turno segue aberto, como um turno comum.
@@ -1568,6 +1592,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     const idle = row.caller_idle_guard === false ? undefined : createCallerIdleGuard({
       clock,
       schedule,
+      language: row.language,
       // `wrapUp` e `finish` param a guarda, e a passagem para a do trecho antigo: depois disso ela não chama nada.
       say: (text) => session.say(text),
       end: (farewell) => wrapUp(farewell, { status: "completed", endReason: CALLER_SILENT }),

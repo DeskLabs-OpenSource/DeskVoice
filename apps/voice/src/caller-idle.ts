@@ -1,4 +1,4 @@
-import type { Clock } from "@deskvoice/core";
+import { spokenLanguageOf, type Clock, type SpokenLanguage } from "@deskvoice/core";
 import type { Schedule } from "./transport";
 
 /**
@@ -29,10 +29,26 @@ export const IDLE_END_MS = 8_000;
 // Os prazos acima são o ponto de partida do desenho, sem medida com gente (28 s no total, para não
 // derrubar quem só estava pensando). Se o teste com pessoas mostrar que são curtos, viram configuração.
 
-/** Os textos falados. O motor fala no idioma do agente, como o `ASK_TO_REPEAT`. */
-export const IDLE_ASK = "Você ainda está aí?";
-export const IDLE_ASK_AGAIN = "Se ainda estiver na linha, é só falar.";
-export const IDLE_FAREWELL = "Como não estou ouvindo você, vou encerrar. Pode ligar de novo quando quiser.";
+/**
+ * Os textos falados, no idioma do agente do trecho (`language` das dependências, escolhido por
+ * `spokenLanguageOf`, como `HANDOFF_GREETINGS`). Vão já no idioma: o motor pipeline entrega o texto
+ * à voz como veio, sem cérebro no meio que traduza (DESA-517).
+ */
+export const IDLE_ASK: Readonly<Record<SpokenLanguage, string>> = {
+  "pt-BR": "Você ainda está aí?",
+  en: "Are you still there?",
+  es: "¿Sigue ahí?",
+};
+export const IDLE_ASK_AGAIN: Readonly<Record<SpokenLanguage, string>> = {
+  "pt-BR": "Se ainda estiver na linha, é só falar.",
+  en: "If you're still on the line, just say something.",
+  es: "Si todavía está en la línea, solo hable.",
+};
+export const IDLE_FAREWELL: Readonly<Record<SpokenLanguage, string>> = {
+  "pt-BR": "Como não estou ouvindo você, vou encerrar. Pode ligar de novo quando quiser.",
+  en: "Since I can't hear you, I'm going to end the call. Feel free to call back anytime.",
+  es: "Como no lo escucho, voy a terminar la llamada. Puede volver a llamar cuando quiera.",
+};
 
 /** O `endReason` da ligação que a guarda encerrou. */
 export const CALLER_SILENT = "caller_silent";
@@ -47,6 +63,8 @@ export interface CallerIdle {
 export interface CallerIdleDeps {
   clock: Clock;
   schedule: Schedule;
+  /** O idioma do agente do trecho, como gravado (`en-US`): os textos saem nele. */
+  language: string;
   say(text: string): void;
   /** A despedida e o fim da ligação, com `endReason: "caller_silent"`. */
   end(farewell: string): void;
@@ -73,6 +91,7 @@ export interface CallerIdleGuard {
 
 export function createCallerIdleGuard(deps: CallerIdleDeps): CallerIdleGuard {
   const { clock, schedule } = deps;
+  const spoken = spokenLanguageOf(deps.language);
   let stopped = false;
   let toolsRunning = 0;
   /** Quantos lembretes já foram feitos desde o último sinal de quem ligou. */
@@ -109,18 +128,18 @@ export function createCallerIdleGuard(deps: CallerIdleDeps): CallerIdleGuard {
     if (step === 0) {
       step = 1;
       deps.acted(report("asked"));
-      deps.say(IDLE_ASK);
+      deps.say(IDLE_ASK[spoken]);
       return plan();
     }
     if (step === 1) {
       step = 2;
       deps.acted(report("asked_again"));
-      deps.say(IDLE_ASK_AGAIN);
+      deps.say(IDLE_ASK_AGAIN[spoken]);
       return plan();
     }
     stopped = true;
     deps.acted(report("ended"));
-    deps.end(IDLE_FAREWELL);
+    deps.end(IDLE_FAREWELL[spoken]);
   }
 
   /** Sinal de quem ligou: volta ao zero, e a guarda espera a próxima fala do agente. */
