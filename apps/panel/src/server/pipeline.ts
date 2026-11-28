@@ -1,26 +1,29 @@
 import type { OrgQuery } from "@deskvoice/core";
-import { pricePipeline, type PipelineChoice } from "@deskvoice/voice-engine/pipeline-choice";
+import { pricePipeline, transcriberConsentSetting, transcriberKeySettingOf, type PipelineChoice } from "@deskvoice/voice-engine/pipeline-choice";
 // Pelo caminho dos tipos: o índice do pacote carrega a descoberta por pasta, que não existe no pacote do Next.
 import type { PipelinePieceKind, ProcessingLocation } from "@deskvoice/voice-engine/types";
 import { brainModelsSetting, listBrains } from "./brains";
 import { ApiError, type ServerDeps } from "./context";
 import { listAllSynthesizers, readConsent, synthesizerConsentSetting } from "./synthesizers";
-import { listTranscribers } from "./transcribers";
+import { listOfferedTranscribers, listTranscribers } from "./transcribers";
 
 /** A peça simulada (sem chave, sem fornecedor) serve aos testes e à prova de primeira impressão, nunca a um agente de verdade. */
 const SIMULATED = "simulated";
 
-/** Por que o pipeline está desligado neste servidor. */
-export type PipelineUnavailable = { reason: "no_live_transcriber" };
+/** Por que o pipeline está desligado nesta organização. */
+export type PipelineUnavailable = { reason: "no_live_transcriber" | "no_transcriber_key" };
 
 /**
- * O pipeline fica desligado enquanto a pasta não tiver transcrição real, fora a simulada, que só serve
- * aos testes (fatia 5b-1). Ela chega com a medida da R12 (fatia 6). Mesmo ligado, nesta fatia ninguém
- * o escolhe como motor: a recusa de `engine` e a de `pipeline_piece_test_only` continuam valendo.
+ * O pipeline fica desligado enquanto a pasta não tiver transcrição de verdade, fora a simulada, que só
+ * serve aos testes (fatia 5b-1), ou enquanto a organização não tiver a chave que uma delas usa (fatia 6:
+ * a da OpenAI usa a do motor OpenAI Realtime). Ligado, a recusa de `engine` e a de
+ * `pipeline_piece_test_only` continuam valendo.
  */
-export async function pipelineUnavailable(): Promise<PipelineUnavailable | null> {
-  const live = (await listTranscribers()).some((piece) => piece.id !== SIMULATED);
-  return live ? null : { reason: "no_live_transcriber" };
+export async function pipelineUnavailable(q: OrgQuery): Promise<PipelineUnavailable | null> {
+  const live = await listOfferedTranscribers();
+  if (live.length === 0) return { reason: "no_live_transcriber" };
+  const keyed = await q.one<{ found: boolean }>("select true as found from settings where key = any($1) limit 1", [live.map(transcriberKeySettingOf)]);
+  return keyed ? null : { reason: "no_transcriber_key" };
 }
 
 const PIECE_NAMES: Record<PipelinePieceKind, string> = { transcriber: "transcriber", brain: "brain", synthesizer: "voice" };
@@ -43,7 +46,7 @@ const leavesServer = (location: ProcessingLocation): boolean => location.kind !=
  *    regra da abertura da ligação (`pricePipeline`, 3b-2);
  * 5. a peça que leva o dado de quem ligou para fora do servidor sem a confirmação gravada
  *    (`pipeline_piece_unconfirmed`, seção 9.1). A da voz é a da fatia 1b (`synthesizer.<id>.consent`);
- *    a da transcrição ainda não existe (é da R12), e por isso nenhuma transcrição de fora passa.
+ *    a da transcrição é a da fatia 6 (`transcriber.<id>.consent`).
  *
  * A confirmação e a lista de preços ficam travadas até o fim da escrita: apagadas no meio, a escolha
  * não passa.
@@ -83,12 +86,14 @@ export async function requirePipeline(q: OrgQuery, deps: Pick<ServerDeps, "simul
   }
 
   if (leavesServer(transcriber.processingLocation)) {
-    throw refuse(
-      "pipeline_piece_unconfirmed",
-      "transcriber",
-      transcriber.id,
-      `${transcriber.label} receives the caller's audio, outside this server, and this version has no place to confirm it yet: choose a transcriber that runs on this server.`,
-    );
+    const consent = readConsent((await q.one<{ value: unknown }>("select value from settings where key = $1 for share", [transcriberConsentSetting(transcriber.id)]))?.value);
+    if (consent === null)
+      throw refuse(
+        "pipeline_piece_unconfirmed",
+        "transcriber",
+        transcriber.id,
+        `${transcriber.label} receives the caller's audio, outside this server, and nobody has confirmed it: confirm it in the Pipeline block of the agent before choosing this transcriber.`,
+      );
   }
   if (leavesServer(synthesizer.processingLocation)) {
     const consent = readConsent((await q.one<{ value: unknown }>("select value from settings where key = $1 for share", [synthesizerConsentSetting(synthesizer.id)]))?.value);

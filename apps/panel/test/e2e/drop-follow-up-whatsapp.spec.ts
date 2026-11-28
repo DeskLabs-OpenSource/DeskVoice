@@ -27,7 +27,7 @@ test("WhatsApp para quem ligou: desabilitada com o motivo sem o pré-requisito, 
     const created = await page.request.post("/api/v1/agents", { data: { name: `Queda ${unique()}`, engine: "simulated" } });
     const agentId = ((await created.json()) as { data: { id: string } }).data.id;
 
-    await page.goto(`/agents/${agentId}`);
+    await page.goto(`/agents/${agentId}?aba=depois`);
     const field = page.getByRole("combobox", { name: agents.dropFollowUp });
     await expect(field).toHaveValue("off");
     await expect(page.getByText(agents.dropFollowUpDefinition)).toBeVisible();
@@ -57,7 +57,7 @@ test("WhatsApp para quem ligou: desabilitada com o motivo sem o pré-requisito, 
     await expect(page.getByRole("heading", { name: settings.whatsappTitle, exact: true })).toBeVisible();
     await expect(page.getByLabel(settings.url, { exact: true })).toBeHidden();
     await expect(page.getByRole("switch", { name: settings.trustCallerSwitch })).toBeHidden();
-    await page.goto(`/agents/${agentId}`);
+    await page.goto(`/agents/${agentId}?aba=depois`);
 
     // Com os dois, a opção vale, e o campo do texto aparece com o aviso e o texto padrão como exemplo.
     await putSetting(page, "whatsapp.trust_caller_id", true);

@@ -90,8 +90,9 @@ A regra tem três consequências práticas:
 | `welcome-does-not-checkout` | O workflow de acolhida, que roda com permissão do repositório, nunca baixa código de fork |
 | `partner-address-has-one-spelling` | Todo endereço do domínio da parceira é o de `install/partner.env`, e ele está no `AGENTS.md` e na skill de instalar |
 | `third-party-images-are-pinned` | Toda imagem de terceiros está fixada por resumo: no Compose de produção (banco, Asterisk, Caddy), na base de cada `Dockerfile` (`FROM`) e nos `services` e `container` dos jobs do CI |
+| `logs-have-a-ceiling` | Todo log da instalação tem teto: cada serviço do Compose de produção tem `logging` com `max-size` e `max-file`, e o Asterisk monta o `logger.conf` do kit, que escreve só no console, sem arquivo dentro do contêiner |
 | `image-name-has-one-source` | O endereço das imagens só está em `deploy/images.env`; o Compose, o kit e a publicação leem dali. A versão de uma instalação é um número, nunca um canal |
-| `every-workspace-is-typechecked` | O `pnpm typecheck` da raiz confere os tipos de todo pacote, testes incluídos: o `tsconfig.json` da raiz inclui o `src` dele, ou o script da raiz chama o `typecheck` dele (o do painel, que a raiz exclui) |
+| `every-workspace-is-typechecked` | O `pnpm typecheck` da raiz confere os tipos de todo pacote, testes incluídos: a cerca resolve os tsconfigs que o script da raiz usa (e os do `typecheck` de cada pacote que ele chama, como o do painel) e reprova todo `src/**/*.ts(x)` que fique de fora. Os scripts só aceitam `tsc -p <tsconfig>` e `pnpm --filter ./<pacote> typecheck`, encadeados por `&&` |
 
 A lista acima é um retrato da fundação. A verdade é a pasta `fences/`.
 

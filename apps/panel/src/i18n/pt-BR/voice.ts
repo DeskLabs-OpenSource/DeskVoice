@@ -71,7 +71,7 @@ const voice = {
   },
   countries: { US: "nos Estados Unidos" } as Record<string, string>,
   /** O nome do fornecedor como a tela o escreve, pelo `provider` da voz. */
-  providers: { elevenlabs: "ElevenLabs" } as Record<string, string>,
+  providers: { elevenlabs: "ElevenLabs", openai: "OpenAI" } as Record<string, string>,
   /**
    * A retenção, pelo `provider` da voz. Só o que as páginas dizem, lidas em 17/11/2026 (DESA-101):
    * https://elevenlabs.io/docs/eleven-api/resources/zero-retention-mode. Mudar uma frase aqui pede

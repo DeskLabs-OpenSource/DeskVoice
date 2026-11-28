@@ -113,6 +113,13 @@ export interface VoiceSessionEvents {
    */
   pieceUsage(line: PieceUsageLine): void;
   /**
+   * O consumo de um modelo que o motor pede ao provedor à parte, dentro da mesma sessão, e que o
+   * provedor cobra pelo preço desse modelo, e não pelo do motor (o OpenAI Realtime e a transcrição
+   * de quem ligou, item 3.4 da revisão fria da 0.50.0). Incremento, como `usage`. Opcional: motor que
+   * não pede modelo à parte não emite.
+   */
+  sideUsage(line: SideUsageLine): void;
+  /**
    * Só o pipeline (R5, fatia 3c-1): o tempo de um turno respondido, um evento por turno, no primeiro
    * áudio da resposta entregue. Turno que não chega a tocar áudio não emite. Opcional: motor que não
    * emite não muda nada.
@@ -177,6 +184,18 @@ export interface PieceUsageLine {
   estimated: boolean;
 }
 
+/**
+ * Uma linha de consumo de um modelo à parte do motor (`VoiceSessionEvents.sideUsage`), com o preço
+ * desse modelo. `estimated` diz que o provedor não informou o consumo, e o motor o contou do áudio
+ * que mandou: a conta pende para mais, nunca para menos.
+ */
+export interface SideUsageLine {
+  model: string;
+  pricing: EnginePricing;
+  usage: Usage;
+  estimated: boolean;
+}
+
 export interface VoiceSession {
   on<K extends keyof VoiceSessionEvents>(event: K, handler: VoiceSessionEvents[K]): void;
   /** Áudio de quem ligou. Sempre PCM16 mono 8 kHz. */
@@ -193,6 +212,13 @@ export interface VoiceSession {
    * quando mandou fechar. A sessão só tira o turno da latência por turno quando o motor agiu.
    */
   closeCallerTurn(): boolean | void;
+  /**
+   * O provedor já fechou a vez de quem ligou e prepara a resposta, que ainda não chegou em áudio. A
+   * guarda contra o silêncio lê isto antes de pedir para repetir: com a resposta a caminho, o pedido
+   * entraria na fila atrás dela e soaria logo depois (ligação real pelo WhatsApp, 26/11/2026). A guarda
+   * espera um prazo a mais, uma vez, e pede mesmo assim se o áudio não vier. Sem o método, pede como antes.
+   */
+  answering?(): boolean;
   /**
    * Contexto para o agente, que não vira fala por si. Entra pelo mecanismo que o provedor documenta,
    * nunca por `say`. Sem o método, o motor não aceita orientação, e quem chama registra isso.
@@ -493,6 +519,12 @@ export interface StreamingTranscriber {
   pricing: EnginePricing;
   /** Verdadeiro quando não usa chave (o simulado, ou um local). */
   keyless?: boolean;
+  /**
+   * A chave da organização que a peça usa, quando ela é a de outra peça já gravada (a transcrição da
+   * OpenAI usa a do motor OpenAI Realtime, `engine.openai-realtime.api_key`): não há chave nova. Ausente,
+   * a chave é `transcriber.<id>.api_key`.
+   */
+  keySetting?: string;
   /** Quantos termos de vocabulário o serviço aceita. Acima disso, os primeiros N. */
   maxVocabulary: number;
   connect(config: { language: string; vocabulary: readonly string[] }, apiKey: string, options?: ConnectOptions): Promise<StreamingTranscription>;

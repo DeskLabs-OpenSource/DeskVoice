@@ -7,13 +7,35 @@ line() { printf '%s\n' "$out" | grep "$1" | head -n 1; }
 
 # Instalação nova: tudo no ar, linha e motor ainda por configurar.
 out="$(bash "$H" 2>&1)"; equal "instalação nova sem linha nem chave: sai com zero" 0 "$?"
-equal "uma linha por peça (19 peças)" 19 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
-for piece in Painel Banco "Painel → banco" "Login do painel" Asterisk "Módulos SIP" "Worker de voz" Rotinas "Rotinas → fila" "Linha telefônica" "Motor de voz" WhatsApp "Portas UDP locais" Disco; do contains "tem a linha de: $piece" "$out" "$piece"; done
+equal "uma linha por peça (20 peças)" 20 "$(printf '%s\n' "$out" | grep -cE '^  (ok|aviso|falha) ')"
+for piece in Painel Banco "Painel → banco" "Login do painel" Asterisk "Módulos SIP" "Worker de voz" Rotinas "Rotinas → fila" "Linha telefônica" "Motor de voz" WhatsApp "Portas UDP locais" Disco "Log do Asterisk"; do contains "tem a linha de: $piece" "$out" "$piece"; done
 contains "linha não cadastrada é aviso, não falha" "$(line 'Linha telefônica')" "aviso"
 contains "linha não cadastrada traz o detalhe" "$(line 'Linha telefônica')" "nenhuma linha cadastrada ainda"
 contains "motor sem chave é aviso, não falha" "$(line 'Motor de voz')" "aviso"
 contains "portas: honesto sobre o que não prova" "$(line 'Portas UDP')" "não prova que o provedor deixa passar"
 lacks "não resume tudo num ok" "$out" "tudo ok"
+
+# Log do Asterisk: a pasta pequena é ok; a grande (o messages.log das versões sem teto) é aviso, com o
+# comando que a esvazia, e nunca derruba a checagem; medida de dentro do contêiner.
+contains "log do Asterisk pequeno é ok" "$(line 'Log do Asterisk')" "ok "
+contains "... e diz o tamanho" "$(line 'Log do Asterisk')" "3 MB em /var/log/asterisk"
+check "o log é medido de dentro do contêiner do Asterisk" grep -q "exec -T asterisk du -sm /var/log/asterisk" "$FAKE_DIR/calls.log"
+echo 1023 > "$FAKE_DIR/asterisk_log_mb"
+contains "log do Asterisk logo abaixo de 1 GB ainda é ok" "$(bash "$H" 2>&1 | grep 'Log do Asterisk')" "ok "
+echo 9900 > "$FAKE_DIR/asterisk_log_mb"
+out="$(bash "$H" 2>&1)"; equal "log do Asterisk grande não é falha: sai com zero" 0 "$?"
+contains "log do Asterisk grande é aviso" "$(line 'Log do Asterisk')" "aviso"
+contains "... e diz o tamanho" "$(line 'Log do Asterisk')" "ocupa 9900 MB"
+contains "... e onde fica o log corrente" "$(line 'Log do Asterisk')" "docker compose -f deploy/docker-compose.yml logs asterisk"
+contains "... e o comando que libera o espaço, dizendo que apaga" "$(line 'Log do Asterisk')" "(apaga esse histórico): docker compose -f deploy/docker-compose.yml exec asterisk truncate -s 0 /var/log/asterisk/messages.log"
+lacks "a checagem essencial não mede o log" "$(bash "$H" --essential 2>&1)" "Log do Asterisk"
+printf 'du: /var/log/asterisk: No such file or directory' > "$FAKE_DIR/asterisk_log_mb"
+contains "sem medida, aviso" "$(bash "$H" 2>&1 | grep 'Log do Asterisk')" "aviso"
+rm -f "$FAKE_DIR/asterisk_log_mb"
+printf '%s\n' postgres panel voice routines caddy > "$FAKE_DIR/running"
+contains "Asterisk parado: o log não é medido" "$(bash "$H" 2>&1 | grep 'Log do Asterisk')" "não deu para medir porque o Asterisk não está rodando"
+printf '%s\n' postgres asterisk panel voice routines caddy > "$FAKE_DIR/running"
+out="$(bash "$H" 2>&1)"
 
 # Rede do proxy: máquina sem proxy de outro sistema é o caso normal; com rede existente e NÃO gravada,
 # aparece o aviso — é a instalação anterior à 0.11.0, em que a ligação se perde no recreate.
@@ -283,7 +305,7 @@ lacks "tudo certo: nenhuma falha" "$out" "falha "
 json="$(bash "$H" --json 2>&1)"
 contains "json: código de saída" "$json" '{"exit_code":0,"checks":['
 contains "json: peça com estado e detalhe" "$json" '{"id":"trunk","name":"Linha telefônica","essential":false,"status":"ok","detail":"registrado"}'
-equal "json: dezenove peças" 19 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
+equal "json: vinte peças" 20 "$(printf '%s' "$json" | grep -o '"id":' | wc -l | tr -d ' ')"
 if command -v python3 >/dev/null 2>&1; then check "json: é JSON válido" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$json"; fi
 printf '%s\n' 'panel|ok|diz "aspas" e \barra' 'trunk|ok|x' 'engine|ok|y' > "$FAKE_DIR/panel_health"
 if command -v python3 >/dev/null 2>&1; then check "json: escapa aspas e barra" python3 -c 'import json,sys; json.loads(sys.argv[1])' "$(bash "$H" --json 2>&1)"; fi

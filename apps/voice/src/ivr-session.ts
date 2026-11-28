@@ -111,6 +111,9 @@ interface Ending {
   notice?: string;
 }
 
+/** Mais teclas que isto, na espera de uma gravação, nenhuma tentativa chegaria a ler. */
+const MAX_HELD_KEYS = 32;
+
 const chosenPayload = (option: IvrOption, elapsedMs: number) => ({ digit: option.digit, label: option.label, action: option.action, elapsed_ms: elapsedMs });
 
 export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
@@ -126,6 +129,13 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
   let settled = false;
   let phase: "starting" | "prompt" | "waiting" | "deciding" = "starting";
   let attempt = 0;
+  /**
+   * As teclas que chegam enquanto a URA grava a tentativa sem escolha (`ivr_no_choice`): ficam só aqui,
+   * na memória da sessão, e a próxima tentativa as lê na ordem, como se chegassem nela. Nunca vão a
+   * banco, evento ou log (T5), e somem quando a URA decide.
+   */
+  const held: string[] = [];
+  let holding = false;
   let cancelWait: (() => void) | undefined;
   let resolveDone: (outcome: IvrOutcome) => void = () => undefined;
   const done = new Promise<IvrOutcome>((resolve) => (resolveDone = resolve));
@@ -200,6 +210,7 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
     if (settled) return;
     settled = true;
     phase = "deciding";
+    held.length = 0;
     cancelWait?.();
     await begun;
     try {
@@ -304,8 +315,13 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
   async function noChoice(kind: "timeout" | "invalid"): Promise<void> {
     phase = "deciding";
     cancelWait?.();
-    // Sem a tecla: só a tentativa e o tipo.
-    await recordOne("ivr_no_choice", { attempt, kind });
+    // Sem a tecla: só a tentativa e o tipo. A tecla que chega enquanto isto grava espera em `held`.
+    holding = true;
+    try {
+      await recordOne("ivr_no_choice", { attempt, kind });
+    } finally {
+      holding = false;
+    }
     if (settled) return;
     if (attempt < menu.maxAttempts) return playAttempt();
     const person = personExitOf(menu.options);
@@ -320,6 +336,9 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
     attempt += 1;
     const mine = attempt;
     phase = "prompt";
+    // Quem liga já apertou a próxima tecla: ela vale nesta tentativa, sem tocar o anúncio de novo.
+    const early = held.shift();
+    if (early !== undefined) return press(early);
     transport.sendAudio(input.menu.promptAudio ?? Buffer.alloc(0));
     await transport.drained();
     // Uma tecla cortou o anúncio, ou a URA já decidiu: esta espera não vale mais.
@@ -331,7 +350,12 @@ export function startIvrSession(deps: IvrDeps, input: IvrInput): IvrSession {
   }
 
   function press(digit: string): void {
-    if (settled || (phase !== "prompt" && phase !== "waiting")) return;
+    if (settled) return;
+    if (holding) {
+      if (held.length < MAX_HELD_KEYS) held.push(digit);
+      return;
+    }
+    if (phase !== "prompt" && phase !== "waiting") return;
     // A tecla no meio do anúncio corta o que falta tocar.
     if (phase === "prompt") transport.clearAudio();
     cancelWait?.();
