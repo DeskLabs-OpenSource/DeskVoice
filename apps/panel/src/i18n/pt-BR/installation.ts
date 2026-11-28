@@ -169,7 +169,7 @@ const installation = {
       update_requested: "{who} pediu a atualização para a versão {target}, a partir de {org}.",
       trunk_overlap_refused: "{who} tentou salvar em {org} uma linha cuja faixa cruza a de outra organização. A tela pediu confirmação.",
       trunk_overlap_confirmed: "{who} salvou em {org}, depois do aviso, uma linha cuja faixa cruza a de outra organização. As linhas por IP das duas param de receber chamadas.",
-      trunk_overlap_many_checks: "{who} conferiu faixas de linha em {org} mais de 20 vezes hoje.",
+      trunk_overlap_many_checks: "{who} conferiu faixas de linha em {org} mais de 20 vezes no dia.",
     },
     sources: {
       command: "pelo comando de dentro do servidor",

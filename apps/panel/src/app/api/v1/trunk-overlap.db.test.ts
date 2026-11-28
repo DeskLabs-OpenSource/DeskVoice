@@ -510,6 +510,8 @@ describe("a organização que confere muitas faixas no dia aparece na auditoria"
       expect(text).toContain(String(TRUNK_OVERLAP_CHECKS_BEFORE_AUDIT));
       expect(text.match(/\{[a-zA-Z]+\}/g)?.sort()).toEqual(["{org}", "{who}"]);
     }
-    expect(ptBRInstallation.audit.kinds.trunk_overlap_many_checks).toBe("{who} conferiu faixas de linha em {org} mais de 20 vezes hoje.");
+    expect(ptBRInstallation.audit.kinds.trunk_overlap_many_checks).toBe("{who} conferiu faixas de linha em {org} mais de 20 vezes no dia.");
+    expect(enInstallation.audit.kinds.trunk_overlap_many_checks).toBe("{who} checked line ranges in {org} more than 20 times in one day.");
+    expect(esInstallation.audit.kinds.trunk_overlap_many_checks).toBe("{who} comprobó rangos de línea en {org} más de 20 veces en el día.");
   });
 });
