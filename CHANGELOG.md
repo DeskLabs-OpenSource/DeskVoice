@@ -3,6 +3,20 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.54.0] - 2026-11-28
+
+### Adicionado
+
+- **A auditoria da instalação registra a organização que confere faixas de linha muitas vezes no dia** Quando uma organização passa de 20 conferências de faixa de linha no mesmo dia, a auditoria da
+  instalação registra quem conferiu e em qual organização, uma vez por dia. A conta inclui toda
+  gravação de linha que confere a faixa, com qualquer resposta. Quem salva linhas não vê nada
+  diferente. Nada a configurar. Crédito: @melgarafael.
+- **Configurações → Integrações ganha a seção dos servidores de ferramentas (MCP), ainda sem uso na ligação** Quem administra a organização passa a ver, em Configurações → Integrações, abaixo dos webhooks, a seção "Servidores de ferramentas (MCP)". Ali se cadastra um servidor MCP pelo endereço, com um segredo opcional, se buscam as ferramentas que ele oferece e se marca quais ficam liberadas e quais escrevem fora do DeskVoice. O segredo fica cifrado e não volta à tela. Descadastrar pede para digitar o identificador do servidor. Na tela do agente, as ferramentas liberadas aparecem como caixas, agrupadas por servidor, todas desmarcadas. **A ligação ainda não oferece essas ferramentas ao agente:** o que se marca fica gravado para quando ela oferecer, e nenhuma ligação muda por isso. Quem já instalou não precisa fazer nada. Crédito: @melgarafael.
+
+### Corrigido
+
+- **Voz — as falas fixas do sistema saem no idioma do agente** Um agente com o motor pipeline configurado em inglês (`en-US`) ou espanhol (`es-MX`) falava em português as frases que o próprio sistema diz: o "Você ainda está aí?" e o lembrete depois dele, a despedida de quem ficou calado, o "pode repetir?" da linha com barulho, as despedidas do tempo máximo e do teto de custo, e as falas de falha técnica e de transferência. Agora cada uma delas sai no idioma do agente da ligação: "Are you still there?" em inglês, "¿Sigue ahí?" em espanhol. Na passagem entre agentes, vale o idioma de quem recebe a ligação. Em português e em qualquer outro idioma, a frase é a mesma de antes. Na despedida do teto, a fala continua saindo pronta, sem síntese nova. O aviso de gravação e a saudação são textos do operador e não mudam. Contexto: a observação do Verificador 2 no #583. Crédito: @melgarafael.
+
 ## [0.53.1] - 2026-11-28
 
 ### Alterado
