@@ -13,6 +13,13 @@ import { useCanConfigure } from "./me";
 // Códigos cuja mensagem da API traz o detalhe que a pessoa precisa (qual campo, quais números).
 const WITH_DETAIL = new Set(["validation_error", "invalid_numbers", "ivr_menu_in_use", "agent_in_ivr_menu"]);
 
+/**
+ * As recusas do Pipeline ao salvar o agente (`requirePipeline`, fatia 6b) dizem qual peça, pelo
+ * `detail.piece`: a frase troca `{piece}` pelo nome dela no idioma da tela. Sem peça conhecida, "a peça".
+ */
+export const withPiece = (text: string, error: ApiFailure, pieces: Record<string, string>): string =>
+  text.replace("{piece}", (typeof error.detail?.piece === "string" ? pieces[error.detail.piece] : undefined) ?? pieces.piece ?? "");
+
 /** Traduz uma falha da API para a frase da tela: o que aconteceu e o que fazer. */
 export function useErrorText(): (error: unknown) => string {
   const common = useDict(ptBR, en, es);
@@ -21,7 +28,8 @@ export function useErrorText(): (error: unknown) => string {
     if (!(error instanceof ApiFailure)) return t.fallback;
     const limit = limitReachedText(error.code, error.detail, common.limitReached);
     if (limit) return limit;
-    const text = Object.hasOwn(t, error.code) ? t[error.code as keyof typeof t] : t.fallback;
+    const own = Object.hasOwn(t, error.code) ? t[error.code as keyof typeof t] : t.fallback;
+    const text = error.code.startsWith("pipeline_") ? withPiece(own, error, common.pipelinePieces) : own;
     return WITH_DETAIL.has(error.code) ? `${text} ${error.message}` : text;
   };
 }

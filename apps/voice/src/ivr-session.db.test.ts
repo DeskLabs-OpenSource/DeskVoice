@@ -312,11 +312,15 @@ describe("URA: a tecla de quem liga não fica guardada (T5)", { timeout: 60_000 
         options: [{ digit: variant.option, label: LABEL, action: "transfer", transferE164: PERSON }],
       }));
       await promptPlayed(h, 1);
-      for (const digit of TYPED) {
-        h.transport.press(digit);
-        // Cada tecla inválida grava a tentativa e toca o anúncio de novo; a próxima tecla chega nele.
-        await new Promise((resolve) => setTimeout(resolve, 30));
-      }
+      // Quem liga digita rápido: as teclas chegam todas de uma vez. Da segunda em diante, cada uma chega
+      // enquanto a URA grava a tentativa da anterior (`ivr_no_choice`), sem `sleep` e sem sorte.
+      for (const digit of TYPED) h.transport.press(digit);
+      // Se uma tecla se perdesse, a URA voltaria a esperar por outra (o prazo armado de novo) em vez de
+      // acabar: o teste para nisso, sem esperar o próprio prazo do vitest.
+      let ended = false;
+      void h.session.done.then(() => (ended = true));
+      await waitFor(() => ended || h.timers.held().includes(h.menu.timeoutMs), "the ivr to end, or to wait for another key");
+      expect(h.timers.held(), "a fast key was lost: the ivr is waiting for another one").toEqual([]);
       await h.session.done;
 
       // Os eventos da chamada inteira, não só os da URA.
@@ -330,6 +334,8 @@ describe("URA: a tecla de quem liga não fica guardada (T5)", { timeout: 60_000 
       // `attempt` é a contagem das tentativas, em ordem, e nada além dela.
       const attempts = events.filter((event) => event.kind === "ivr_no_choice").map((event) => event.payload.attempt);
       expect(attempts).toEqual(attempts.map((_, index) => index + 1));
+      // Nenhuma tecla rápida se perde: cada uma é uma tentativa, até a opção ou até a última tentativa.
+      expect(attempts).toEqual(variant.chosen ? [1, 2, 3, 4] : [1, 2, 3, 4, 5]);
       expect(events.filter((event) => event.kind.startsWith("transcript_"))).toEqual([]);
       expect(await notificationsOf(app, h.organizationId)).toEqual([]);
 

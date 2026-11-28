@@ -1,7 +1,8 @@
 # A tela do agente em abas, com os cartões Ouvido, Cérebro e Voz e um painel lateral por peça
 
-- **Estado:** desenho. Nenhum código antes do de acordo da revisora neste PR e da resposta do dono
-  às escolhas de cada fatia (seção 8).
+- **Estado:** desenho aprovado, com código em andamento. O de acordo da revisora veio no #593, que
+  entrou na `main` no 684743d, e o dono respondeu A às quatro escolhas em 26/11/2026, 14h30 (seção 8).
+  As fatias saem da `main`, uma por vez (seção 6). A fatia 1 (as abas) é a primeira.
 - **Data:** 2026-11-26
 - **Quem pediu:** o dono, em 26/11, na sessão do orquestrador. Ele pediu que a tela do agente, que
   hoje é uma página só com tudo junto, passe a ter abas organizadas por função, e que a transcrição,

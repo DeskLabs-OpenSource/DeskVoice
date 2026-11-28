@@ -91,6 +91,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # As tags `v*`, só a ponta de cada uma (o checkout é raso e não as traz), para a cerca
+      # migrations-come-after-the-last-release comparar com a última versão publicada; sem elas a
+      # cerca pula. Repositório público: o fetch não precisa de credencial.
+      - name: Buscar as tags
+        run: git fetch --no-recurse-submodules --depth=1 origin '+refs/tags/v*:refs/tags/v*'
       - uses: ./.github/actions/setup
         id: setup
       - run: pnpm lint

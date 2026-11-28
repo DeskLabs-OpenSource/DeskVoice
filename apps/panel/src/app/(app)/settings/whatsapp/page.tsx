@@ -15,11 +15,16 @@ import { Button, Field, Notice, Panel, Select, Switch, TextInput } from "../../.
 import { useCanConfigure } from "../../../../ui/me";
 import type { Setting } from "../../../../ui/types";
 import { Advanced } from "../advanced";
+import { DeskcommCrm } from "../deskcomm-crm";
 import { URL_PREFIX, put } from "../setting-api";
 import { WhatsAppPanel } from "../whatsapp-panel";
 
 // `waha` é o número conectado por QR Code: não tem endereço e não se edita por este formulário.
-type Connector = { type: "deskcomm" | "webhook"; url: string } | { type: "waha" };
+// O `deskcomm` com `crmUrl` fala o contrato do CRM (#330, fatia 2); sem ele, manda para a `url`.
+type Connector = { type: "deskcomm" | "webhook"; url: string; crmUrl?: string; channelSessionId?: string; channelLabel?: string } | { type: "waha" };
+// Como o `deskcomm` fala: pelo contrato do CRM, ou pelo formato antigo, num endereço próprio.
+type Mode = "crm" | "legacy";
+const sameAddress = (a: string, b: string): boolean => a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
 
 export default function WhatsAppSettings() {
   const t = useDict(ptBR, en, es);
@@ -31,19 +36,23 @@ export default function WhatsAppSettings() {
   const saveTrustCaller = useAction();
   const ownerNotice = useApi<Setting<boolean>>("/settings/whatsapp.notify_owner_on_call_end");
   const saveOwnerNotice = useAction();
-  const [whatsapp, setWhatsapp] = useState({ type: "deskcomm", url: "", token: "" });
+  const [whatsapp, setWhatsapp] = useState<{ type: string; url: string; token: string; mode: Mode }>({ type: "deskcomm", url: "", token: "", mode: "crm" });
   // A remoção espera confirmação: o botão só abre o pedido, nunca remove.
   const [removingConnector, setRemovingConnector] = useState(false);
 
   useEffect(() => {
     const value = connector.data?.value;
-    if (value && value.type !== "waha") setWhatsapp({ type: value.type, url: value.url, token: "" });
+    if (value && value.type !== "waha") setWhatsapp({ type: value.type, url: value.crmUrl ?? value.url, token: "", mode: value.type === "deskcomm" && value.crmUrl === undefined ? "legacy" : "crm" });
   }, [connector.data]);
 
   const connectorValue = connector.data?.value;
   const connectedByQr = connectorValue?.type === "waha";
   const savedConnector = connectorValue && connectorValue.type !== "waha" ? connectorValue : undefined;
-  const connectorMoved = savedConnector != null && (savedConnector.url !== whatsapp.url || savedConnector.type !== whatsapp.type);
+  const toCrm = whatsapp.type === "deskcomm" && whatsapp.mode === "crm";
+  const savedCrm = savedConnector?.type === "deskcomm" && savedConnector.crmUrl !== undefined ? { ...savedConnector, crmUrl: savedConnector.crmUrl } : undefined;
+  // O destino do token: o tipo, o endereço e se o endereço é do CRM, como no servidor.
+  const connectorMoved =
+    savedConnector != null && (savedConnector.type !== whatsapp.type || !sameAddress(savedConnector.crmUrl ?? savedConnector.url, whatsapp.url) || (savedConnector.crmUrl !== undefined) !== toCrm);
 
   return (
     <>
@@ -59,24 +68,35 @@ export default function WhatsAppSettings() {
               className="grid gap-4"
               onSubmit={(event) => {
                 event.preventDefault();
-                const { token, ...rest } = whatsapp;
-                void saveConnector.run(() => put("whatsapp.connector", { ...rest, ...(token && { token }) })).then(connector.reload);
+                const { token, type, url } = whatsapp;
+                // O canal continua enquanto o CRM for o mesmo; outro CRM começa pela regra dele.
+                const channel = toCrm && savedCrm && sameAddress(savedCrm.crmUrl, whatsapp.url) && savedCrm.channelSessionId ? { channelSessionId: savedCrm.channelSessionId, ...(savedCrm.channelLabel && { channelLabel: savedCrm.channelLabel }) } : {};
+                void saveConnector.run(() => put("whatsapp.connector", { type, url, ...(toCrm && { crmUrl: whatsapp.url, ...channel }), ...(token && { token }) })).then(connector.reload);
               }}
             >
-              <fieldset disabled={!canConfigure} className="grid gap-4 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.4fr)_minmax(0,1fr)]">
+              <fieldset disabled={!canConfigure} className="grid gap-4 md:grid-cols-2">
                 <Field label={t.connectorType}>
                   <Select value={whatsapp.type} onChange={(event) => setWhatsapp({ ...whatsapp, type: event.target.value })}>
                     <option value="deskcomm">{t.typeDeskcomm}</option>
                     <option value="webhook">{t.typeWebhook}</option>
                   </Select>
                 </Field>
-                <Field label={t.url}>
+                {whatsapp.type === "deskcomm" ? (
+                  <Field label={t.crmMode}>
+                    <Select value={whatsapp.mode} onChange={(event) => setWhatsapp({ ...whatsapp, mode: event.target.value === "legacy" ? "legacy" : "crm" })}>
+                      <option value="crm">{t.crmModeCrm}</option>
+                      <option value="legacy">{t.crmModeLegacy}</option>
+                    </Select>
+                  </Field>
+                ) : null}
+                <Field label={toCrm ? t.crmUrl : t.url} hint={toCrm ? t.crmUrlHint : whatsapp.type === "deskcomm" ? t.crmLegacyHint : undefined}>
                   <TextInput mono type="url" placeholder={URL_PREFIX} value={whatsapp.url} onChange={(event) => setWhatsapp({ ...whatsapp, url: event.target.value })} required />
                 </Field>
                 <Field label={t.token} hint={connectorMoved ? t.tokenAgain : savedConnector ? t.tokenKept : undefined}>
                   <TextInput mono type="password" autoComplete="off" value={whatsapp.token} onChange={(event) => setWhatsapp({ ...whatsapp, token: event.target.value })} required={!savedConnector || connectorMoved} />
                 </Field>
               </fieldset>
+              {toCrm ? <p className="max-w-prose text-muted">{t.crmTokenHint}</p> : null}
               {canConfigure ? (
                 <div className="flex flex-wrap items-center gap-3">
                   <Button type="submit" busy={saveConnector.busy}>
@@ -100,7 +120,7 @@ export default function WhatsAppSettings() {
                       onClick={() =>
                         void saveConnector.run(() => put("whatsapp.connector", null)).then((ok) => {
                           if (ok) {
-                            setWhatsapp({ type: "deskcomm", url: "", token: "" });
+                            setWhatsapp({ type: "deskcomm", url: "", token: "", mode: "crm" });
                             setRemovingConnector(false);
                           }
                           connector.reload();
@@ -117,6 +137,8 @@ export default function WhatsAppSettings() {
               ) : null}
             </form>
           )}
+          {/* A `key` pelo CRM gravado: outro CRM recomeça o bloco, sem a conferência e o canal do anterior. */}
+          {savedCrm && !connectedByQr ? <DeskcommCrm key={savedCrm.crmUrl.replace(/\/+$/, "")} saved={savedCrm} canConfigure={canConfigure} onSaved={connector.reload} /> : null}
           <div className="grid gap-3 border-t border-line pt-5">
             <h3 className="font-bold">{t.trustCallerTitle}</h3>
             <p className="max-w-prose text-muted">{t.trustCallerLead}</p>
