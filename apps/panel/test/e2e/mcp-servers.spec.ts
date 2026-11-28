@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import agents from "../../src/i18n/pt-BR/agents";
 import common from "../../src/i18n/pt-BR/common";
 import { fill } from "../../src/i18n/locales";
 import mcp from "../../src/i18n/pt-BR/mcp";
@@ -107,6 +108,7 @@ test("MCP: a dona descobre as ferramentas, marca, salva, e o agente vê as caixa
   expect(created.status()).toBe(200);
   const agentId = ((await created.json()) as { data: { id: string } }).data.id;
   await page.goto(`/agents/${agentId}`);
+  await page.getByRole("tab", { name: agents.tabs.ferramentas }).click();
   const groupName = fill(mcp.agentGroup, { label });
   const group = page.getByRole("group", { name: groupName });
   await expect(group.getByRole("checkbox")).toHaveCount(2);
@@ -120,6 +122,7 @@ test("MCP: a dona descobre as ferramentas, marca, salva, e o agente vê as caixa
   expect(((await patch).postDataJSON() as { tools: string[] }).tools).toContain(`${slug}__consultar_pedido`);
   await expect(page.getByRole("status").filter({ hasText: common.actions.saved })).toHaveText(common.actions.saved);
   await page.reload();
+  await page.getByRole("tab", { name: agents.tabs.ferramentas }).click();
   await expect(page.getByRole("group", { name: groupName }).getByRole("checkbox", { name: /consultar_pedido/ })).toBeChecked();
   await expect(page.getByRole("group", { name: groupName }).getByRole("checkbox", { name: /cancelar_pedido/ })).not.toBeChecked();
 });

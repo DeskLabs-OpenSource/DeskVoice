@@ -79,6 +79,11 @@ export const CALL_EVENT_KINDS = [
   "ivr_ended",
   "webhook_delivered",
   "webhook_failed",
+  "transcriber_failed",
+  // Uma peça do motor pipeline (R5) falhou sem encerrar a ligação: o cérebro num pedido, ou o aviso da transcrição.
+  "pipeline_turn_failed",
+  // O tempo de um turno respondido pelo motor pipeline (R5, fatia 3c-1): um por turno, só números.
+  "pipeline_turn_latency",
 ] as const;
 
 export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];
@@ -110,7 +115,7 @@ export type NotificationAudience = "team" | "caller";
  * O que acontece na organização fora de uma chamada e precisa ficar registrado
  * (`organization_events`). Fechado como o da chamada: acontecimento novo entra aqui.
  */
-export const ORG_EVENT_KINDS = ["transcript_retention_changed", "transcripts_purged", "caller_data_exported", "call_recording_changed", "caller_data_erased", "caller_recordings_erased", "share_created", "share_downloaded", "share_revoked", "caller_notes_purged", "caller_notes_retention_changed", "caller_notes_deleted", "caller_memory_changed", "analyst_provider_confirmed", "organization_created", "organization_renamed", "decision_model_provider_confirmed", "synthesizer_provider_confirmed", "organization_suspended", "organization_reactivated", "support_access_started", "support_access_ended"] as const;
+export const ORG_EVENT_KINDS = ["transcript_retention_changed", "transcripts_purged", "caller_data_exported", "call_recording_changed", "caller_data_erased", "caller_recordings_erased", "share_created", "share_downloaded", "share_revoked", "caller_notes_purged", "caller_notes_retention_changed", "caller_notes_deleted", "caller_memory_changed", "analyst_provider_confirmed", "organization_created", "organization_renamed", "decision_model_provider_confirmed", "synthesizer_provider_confirmed", "transcriber_provider_confirmed", "organization_suspended", "organization_reactivated", "support_access_started", "support_access_ended"] as const;
 
 export type OrgEventKind = (typeof ORG_EVENT_KINDS)[number];
 

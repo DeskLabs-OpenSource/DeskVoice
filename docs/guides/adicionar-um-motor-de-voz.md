@@ -206,6 +206,41 @@ motor novo não cria variável de ambiente e não lê chave de outro lugar.
 Se o provedor precisa de mais do que uma chave (uma região, um identificador de projeto), isso é
 configuração com tela. Diga no PR o que o operador precisa informar.
 
+## Motores candidatos
+
+Um candidato é um modelo que alguém pediu para avaliar. **Ele não é um motor do DeskVoice**: não
+há código para ele, e nada aqui promete que haverá. Cada resposta abaixo vem de uma fonte oficial,
+com a data da leitura. Onde a fonte não diz, está escrito "não confirmado".
+
+### PersonaPlex (NVIDIA)
+
+Modelo de voz direta e full-duplex (ouve e fala ao mesmo tempo), `nvidia/personaplex-7b-v1`.
+Pedido na issue [#180](https://github.com/DeskLabs-OpenSource/DeskVoice/issues/180).
+Implementá-lo exige GPU própria, que é um gasto novo, e por isso depende de uma decisão do dono
+antes de qualquer código.
+
+- **GPU:** o model card lista como hardware compatível NVIDIA Ampere (A100) e NVIDIA Hopper
+  (H100), em Linux, e diz que foi testado numa NVIDIA A100 de 80 GB. Nem o model card nem o
+  repositório informam a memória (VRAM) mínima: **não confirmado**. O repositório oferece a
+  opção `--cpu-offload` para GPU com pouca memória, sem dizer quanto ela exige.
+  Fonte: [model card](https://huggingface.co/nvidia/personaplex-7b-v1) e
+  [repositório](https://github.com/NVIDIA/personaplex), lidos em 23/11/2026.
+- **Licença do modelo (pesos):** NVIDIA Open Model License Agreement. Para baixar os pesos, é
+  preciso entrar no Hugging Face e aceitar essa licença. O model card cita também, como
+  "informação adicional", a licença CC-BY-4.0, com link para o modelo de base
+  `kyutai/moshiko-pytorch-bf16`. Fonte: [model card](https://huggingface.co/nvidia/personaplex-7b-v1)
+  e [texto da licença](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/),
+  lidos em 23/11/2026.
+- **Licença do código:** MIT (arquivo `LICENSE-MIT`). Fonte:
+  [repositório](https://github.com/NVIDIA/personaplex), lido em 23/11/2026.
+- **Português:** o model card diz que o modelo gera fala em inglês para fala em inglês. Ele não
+  cita outro idioma. Falar pt-BR **não está confirmado** pela fonte. Fonte:
+  [model card](https://huggingface.co/nvidia/personaplex-7b-v1), lido em 23/11/2026.
+- **Sem serviço pago:** o repositório mostra o servidor rodando na própria máquina
+  (`localhost:8998`), com os pesos baixados do Hugging Face, e não cita API paga. Fonte:
+  [repositório](https://github.com/NVIDIA/personaplex) e
+  [model card](https://huggingface.co/nvidia/personaplex-7b-v1), lidos em 23/11/2026.
+
 ## Documentos relacionados
 
 - [Decisão 0002](../decisions/0002-asterisk-e-audiosocket.md): por que o áudio é este e a

@@ -1,0 +1,3 @@
+// Pelo nome do pacote, e não pelo caminho relativo.
+import voice from "@deskvoice/voice-engine/src/synthesizers/simulated";
+export default voice;

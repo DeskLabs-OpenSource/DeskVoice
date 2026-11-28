@@ -44,7 +44,7 @@ export function createCallWebhook(deps: ToolDeps = {}) {
   return defineTool({
     name: "call_webhook",
     description:
-      "Chama uma integração que o operador cadastrou (por exemplo, consultar um pedido ou abrir um chamado em outro sistema) e devolve a resposta dela. Use só quando as suas instruções mandarem usar uma integração pelo nome. NÃO use por iniciativa própria nem invente nomes: se o nome não existir, a ferramenta devolve a lista dos cadastrados. Você nunca informa endereço, só o nome. Se a integração não responder a tempo, não chame de novo: siga o que a resposta da ferramenta disser.",
+      "Chama uma integração que o operador cadastrou (por exemplo, consultar um pedido ou abrir um chamado em outro sistema) e devolve a resposta dela. Use só quando as suas instruções mandarem usar uma integração pelo nome. NÃO use por iniciativa própria nem invente nomes: use só os nomes que as suas instruções trazem. Você nunca informa endereço, só o nome. Se a integração não responder a tempo, não chame de novo: siga o que a resposta da ferramenta disser.",
     inputSchema: z.object({
       name: z.string().min(1).describe("Nome da integração, exatamente como aparece nas suas instruções."),
       payload: z.record(z.string(), z.unknown()).default({}).describe("Dados enviados à integração, no formato que as suas instruções descrevem."),
@@ -53,17 +53,19 @@ export function createCallWebhook(deps: ToolDeps = {}) {
       const hooks = await loadAllowedWebhooks(ctx.q, (deps.secretKey ?? configSecretKey)());
       const hook = hooks.find((candidate) => candidate.name === input.name);
       if (!hook) {
-        const names = hooks.map((candidate) => candidate.name).join(", ");
+        // Só diz que o nome não existe: a resposta não lista as integrações cadastradas, que o
+        // agente não recebeu nas instruções e quem está na linha não precisa conhecer.
         return {
           ok: false,
           noEffect: true,
-          message: `Não existe integração chamada "${input.name}", e nada foi chamado. ${names ? `Cadastradas: ${names}.` : "Nenhuma integração está cadastrada nesta central."} Não tente outro nome por conta própria.`,
+          message: `Não existe integração chamada "${input.name}", e nada foi chamado. Não tente outro nome por conta própria.`,
         };
       }
       const key = webhookIdempotencyKey(ctx.callId, hook.name, input.payload);
       let response;
       try {
-        response = await postToWebhook(hook, { callId: ctx.callId, ...input.payload }, deps, key);
+        // O `callId` da ligação vem por último: o modelo não o troca mandando um `callId` no payload.
+        response = await postToWebhook(hook, { ...input.payload, callId: ctx.callId }, deps, key);
       } catch (error) {
         if (!(error instanceof SafeFetchTimeoutError)) throw error;
         // Sem resposta não é falha: o pedido pode ter sido registrado. O modelo não pode repetir às cegas.

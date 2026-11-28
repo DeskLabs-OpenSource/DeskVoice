@@ -2,7 +2,7 @@
 // Este teste roda a massa inteira de `trunks.test.ts` de novo, anotando cada lista de linhas que
 // passou por `renderTrunksConf`, e confere que, em cada uma, as linhas por IP que a regra pura diz
 // "fora por sobreposição entre organizações" são as que o arquivo pulou com esse motivo.
-import { hostsOverlap, ipTrunksOutByOverlap, parseTrunkHost } from "@deskvoice/core";
+import { hostsOverlap, ipTrunksOutByOverlap, parseTrunkHost, trunkEntersGroups } from "@deskvoice/core";
 import { afterAll, expect, vi } from "vitest";
 import type * as Trunks from "./trunks";
 import type { TrunkConfig } from "./trunks";
@@ -28,6 +28,44 @@ const addresses = (trunk: TrunkConfig) =>
 
 afterAll(async () => {
   const { SHARED_HOST_REASON, trunkProblem } = await vi.importActual<typeof Trunks>("./trunks");
+  // O painel decide com `trunkEntersGroups` quais linhas entram no agrupamento; o arquivo, com
+  // `trunkProblem`. As duas respostas precisam ser a mesma, linha por linha (o id fica de fora: a
+  // linha nova do painel ainda não tem um).
+  const UUID = "00000000-0000-4000-8000-000000000001";
+  const base: TrunkConfig = { id: UUID, organizationId: "org", host: "203.0.113.5", username: "conta100", password: "segredo", authMode: "register", matchExtra: [], outboundHost: null, publicIp: "198.51.100.1", inboundFilter: true } as TrunkConfig;
+  const edges: TrunkConfig[] = [
+    base,
+    { ...base, password: null },
+    { ...base, username: null },
+    { ...base, username: "joão" },
+    { ...base, username: "a".repeat(81) },
+    { ...base, password: ">segredo" },
+    { ...base, password: "segredo " },
+    { ...base, password: " segredo" },
+    { ...base, password: "seg\u0085redo" },
+    { ...base, password: "a".repeat(129) },
+    { ...base, password: "a".repeat(128) },
+    { ...base, host: "203.0.113.0/29" },
+    { ...base, host: "sip.operadora.example" },
+    { ...base, outboundHost: "198.51.100.9" },
+    { ...base, matchExtra: ["sip.operadora.example"] },
+    { ...base, matchExtra: ["10.0.0.0/8"] },
+    { ...base, authMode: "ip", username: null, password: null },
+    { ...base, authMode: "ip", username: null, password: null, outboundHost: "198.51.100.0/30" },
+    { ...base, authMode: "ip", username: null, password: null, outboundHost: "sip.operadora.example" },
+    { ...base, authMode: "ip", username: null, password: null, host: "sip.operadora.example" },
+    { ...base, authMode: "ip", username: null, password: null, host: "10.0.0.0/8" },
+    { ...base, authMode: "ip", username: "joão", password: null },
+    { ...base, authMode: "ip", username: null, password: ">x" },
+  ];
+  const corpus = seen.flatMap(({ input }) => input as TrunkConfig[]);
+  let refused = 0;
+  for (const trunk of [...edges, ...corpus]) {
+    const fits = trunkProblem({ ...trunk, id: UUID }) === null;
+    if (!fits) refused += 1;
+    expect(trunkEntersGroups(trunk), JSON.stringify({ ...trunk, password: trunk.password === null ? null : "…" })).toBe(fits);
+  }
+  expect(refused).toBeGreaterThan(15);
   let withCrossOrganization = 0;
   for (const { input, skipped, emitted } of seen) {
     const trunks = input as TrunkConfig[];
