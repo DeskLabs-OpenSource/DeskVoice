@@ -1,5 +1,6 @@
 import { MAX_CALLER_NOTES_PER_CALL, recordEvent } from "@deskvoice/core";
 import type { Tool, ToolContext, ToolResult } from "./types";
+import { TOOL_CALLED_ARGS_MAX } from "./text-limits";
 
 const FAILURE_MESSAGE =
   "Não consegui concluir isso agora. Diga a quem está na linha, com naturalidade, que não foi possível concluir neste momento, e ofereça outra forma de ajudar.";
@@ -93,9 +94,21 @@ async function takeSlot(ctx: ToolContext, name: string, budget: number): Promise
   };
 }
 
-/** O que `tool_called` grava como argumentos: nada do texto, se a ferramenta declara que ele é pessoal. */
+/**
+ * O que `tool_called` grava como argumentos: nada do texto, se a ferramenta declara que ele é pessoal;
+ * a marca com o tamanho, se o JSON passa de `TOOL_CALLED_ARGS_MAX` (trocado, nunca cortado); a marca,
+ * se nem serializa.
+ */
 export function toolCalledArgs(tool: Tool | undefined, rawArgs: unknown): unknown {
-  return tool?.personalTextArgs ? { omitted: "personal_text" } : (rawArgs ?? null);
+  if (tool?.personalTextArgs) return { omitted: "personal_text" };
+  const args = rawArgs ?? null;
+  let chars: number;
+  try {
+    chars = JSON.stringify(args)?.length ?? 0;
+  } catch {
+    return { omitted: "unserializable" };
+  }
+  return chars > TOOL_CALLED_ARGS_MAX ? { omitted: "too_long", chars } : args;
 }
 
 /**
