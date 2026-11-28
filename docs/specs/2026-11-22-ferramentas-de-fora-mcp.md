@@ -366,7 +366,8 @@ a recomendação nas três.
 Duas condições a mais, que entram nas fatias:
 
 - **A 8a chama ao menos um servidor MCP real conhecido** e anota no PR se o cliente mínimo funciona
-  com ele. A 8d continua com os dois servidores reais.
+  com ele. Os dois servidores reais, com uma ligação com cada, ficam com a fatia que liga as MCP
+  à ligação (DESA-524), como diz a seção 7.
 - **O merge de cada fatia espera a palavra do próprio dono**, pedida pelo maestro, por ser
   capacidade nova.
 
