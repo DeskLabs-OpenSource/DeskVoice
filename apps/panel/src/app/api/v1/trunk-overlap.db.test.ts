@@ -167,6 +167,14 @@ const refusedEvents = (organizationId: string) =>
     ]),
   );
 
+/** As linhas inteiras dos eventos `trunk_overlap_confirmed` da organização, como estão no banco. */
+const confirmedEvents = (organizationId: string) =>
+  withSystem(panel.app, (q) =>
+    q.many<{ row: Record<string, unknown> }>("select to_jsonb(e) as row from installation_events e where kind = 'trunk_overlap_confirmed' and organization_id = $1 order by id", [
+      organizationId,
+    ]),
+  );
+
 describe("auditoria e limite da conferência de faixa", () => {
   it("T7: um 409 grava exatamente 1 evento, com a organização e a conta de quem tentou, e nada da outra organização", async () => {
     const s = await scene();
@@ -221,27 +229,185 @@ describe("auditoria e limite da conferência de faixa", () => {
 
   it("T10: a A no teto não afeta a B, que confere normalmente no mesmo minuto", async () => {
     const s = await scene();
-    for (let index = 0; index < TRUNK_OVERLAP_CHECKS_PER_MINUTE; index += 1) expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(409);
-    expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(429);
-    // A A tem uma linha por IP salva com confirmação; a B, na faixa dela, recebe a pergunta.
+    // A A tem uma linha por IP (a confirmação também gasta tentativa), e chega ao teto.
     expect((await s.create({ host: "198.51.100.7", authMode: "ip", confirmOverlap: true })).status).toBe(200);
+    for (let index = 1; index < TRUNK_OVERLAP_CHECKS_PER_MINUTE; index += 1) expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(409);
+    expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(429);
+    // A B, na faixa da linha da A, recebe a pergunta.
     const fromB = await call(createTrunk, { method: "POST", cookie: s.personB.cookie, body: { name: "Outra da B", host: "198.51.100.7", authMode: "ip" } });
     expect(fromB).toMatchObject({ status: 409, code: "trunk_overlap_unconfirmed" });
     expect(await refusedEvents(s.b)).toHaveLength(1);
   });
 
-  it("T11: com a A no teto, a confirmação salva sem conferir e sem evento, e trocar só o nome também passa", async () => {
+  it("T11: a confirmação também gasta tentativa: com a A no teto, até a confirmação recebe 429, sem salvar e sem evento; trocar só o nome passa", async () => {
     const s = await scene();
-    for (let index = 0; index < TRUNK_OVERLAP_CHECKS_PER_MINUTE; index += 1) expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(409);
+    const mine = await s.create({ host: "198.51.100.9", authMode: "ip" });
+    expect(mine.status).toBe(200);
+    const id = (mine.data as { id: string }).id;
+    for (let index = 1; index < TRUNK_OVERLAP_CHECKS_PER_MINUTE; index += 1) expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(409);
     expect((await s.create({ host: "203.0.113.5", authMode: "ip" })).status).toBe(429);
-    const events = (await refusedEvents(s.a)).length;
+    const refused = (await refusedEvents(s.a)).length;
 
-    const saved = await s.create({ host: "203.0.113.5", authMode: "ip", confirmOverlap: true });
-    expect(saved.status).toBe(200);
+    const limited = await s.create({ host: "203.0.113.5", authMode: "ip", confirmOverlap: true });
+    expect(limited).toMatchObject({ status: 429, code: "too_many_attempts" });
     expect(await s.count(s.a)).toBe(1);
-    const id = (saved.data as { id: string }).id;
+    expect((await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { host: "203.0.113.2", confirmOverlap: true } })).status).toBe(429);
     expect((await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { name: "Novo nome" } })).status).toBe(200);
-    expect((await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { host: "203.0.113.2", confirmOverlap: true } })).status).toBe(200);
-    expect(await refusedEvents(s.a)).toHaveLength(events);
+    expect(await refusedEvents(s.a)).toHaveLength(refused);
+    expect(await confirmedEvents(s.a)).toEqual([]);
+
+    panel.clock.at = new Date(NOW.getTime() + 60 * 1000);
+    expect((await s.create({ host: "203.0.113.5", authMode: "ip", confirmOverlap: true })).status).toBe(200);
+  });
+
+  it("T12: a confirmação que tira do ar a linha de outra organização grava 1 evento, com a organização e a conta de quem salvou, e nada da outra", async () => {
+    const s = await scene();
+    const tried = "203.0.113.5";
+    const saved = await s.create({ host: tried, authMode: "ip", confirmOverlap: true });
+    expect(saved.status).toBe(200);
+    const events = await confirmedEvents(s.a);
+    expect(events).toHaveLength(1);
+    const row = events[0]?.row ?? {};
+    expect(row).toMatchObject({ kind: "trunk_overlap_confirmed", organization_id: s.a, actor_account_id: await accountOf(s.personA.id), payload: {} });
+    const text = JSON.stringify(row);
+    for (const secret of [s.bTrunk, s.b, B_NAME, B_LINE, B_RANGE, "203.0.113", tried, "Organização B", await accountOf(s.personB.id)]) expect(text).not.toContain(secret);
+    expect(await confirmedEvents(s.b)).toEqual([]);
+    // A edição confirmada que leva outra linha para a faixa também grava.
+    const other = await s.create({ host: "198.51.100.9", authMode: "ip" });
+    const id = (other.data as { id: string }).id;
+    expect((await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { host: "203.0.113.6", confirmOverlap: true } })).status).toBe(200);
+    expect(await confirmedEvents(s.a)).toHaveLength(2);
+    // Quem administra a instalação vê o evento.
+    const admin = await createUser(panel.app, await createOrganization(panel.app, `Instalação ${randomUUID().slice(0, 8)}`), "owner");
+    await withSystem(panel.app, async (q) => q.exec("update accounts set installation_admin_at = $2 where id = $1", [await accountOf(admin.id), NOW]));
+    const listed = await call(installationEvents, { cookie: admin.cookie });
+    const shown = (listed.data as Array<{ kind: string; organizationId: string | null }>).filter((event) => event.kind === "trunk_overlap_confirmed" && event.organizationId === s.a);
+    expect(shown).toHaveLength(2);
+  });
+
+  it("T13: a confirmação que não tira linha nenhuma do ar não grava evento (a tela manda a confirmação só depois do aviso, mas a rota não confia nisso)", async () => {
+    const s = await scene();
+    expect((await s.create({ host: "198.51.100.7", authMode: "ip", confirmOverlap: true })).status).toBe(200);
+    expect((await s.create({ host: "203.0.113.5", authMode: "ip", confirmOverlap: false })).status).toBe(409);
+    expect(await confirmedEvents(s.a)).toEqual([]);
+  });
+
+  it("T14: a edição confirmada que outra regra recusa não grava evento: a linha por registro que muda de endereço sem a senha nova recebe 400", async () => {
+    const s = await scene();
+    const mine = await s.create({ host: "198.51.100.9", authMode: "register", username: "conta100", password: "segredo" });
+    expect(mine.status).toBe(200);
+    const id = (mine.data as { id: string }).id;
+    const refused = await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { host: "203.0.113.5", confirmOverlap: true } });
+    expect(refused).toMatchObject({ status: 400, code: "password_required" });
+    expect((await withSystem(panel.app, (q) => q.one<{ host: string }>("select host from trunks where id = $1", [id])))?.host).toBe("198.51.100.9");
+    expect(await confirmedEvents(s.a)).toEqual([]);
+    // Com a senha nova, salva e grava o evento.
+    const saved = await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { host: "203.0.113.5", password: "nova", confirmOverlap: true } });
+    expect(saved.status).toBe(200);
+    expect(await confirmedEvents(s.a)).toHaveLength(1);
+  });
+});
+
+/**
+ * A linha da A que ainda não entra no agrupamento (o processo de voz a deixa de fora do arquivo),
+ * gravada antes da linha por IP da B: ninguém é avisado, porque ela não tira nada do ar.
+ */
+async function dormantScene(dormant: Record<string, unknown>) {
+  const a = await createOrganization(panel.app, `Organização A ${randomUUID().slice(0, 8)}`);
+  const personA = await createUser(panel.app, a, "owner");
+  const mine = await call(createTrunk, { method: "POST", cookie: personA.cookie, body: { name: "Linha da A", ...dormant } });
+  expect(mine.status).toBe(200);
+  const id = (mine.data as { id: string }).id;
+  const b = await createOrganization(panel.app, B_NAME);
+  const personB = await createUser(panel.app, b, "owner");
+  // A linha dormente da A não tira a da B do ar: a B salva sem pergunta.
+  const created = await call(createTrunk, { method: "POST", cookie: personB.cookie, body: { name: B_LINE, host: B_RANGE, authMode: "ip" } });
+  expect(created.status).toBe(200);
+  const edit = (body: Record<string, unknown>) => call(patchTrunk, { method: "PATCH", cookie: personA.cookie, params: { id }, body });
+  return { a, b, personA, personB, id, edit };
+}
+
+const REGISTER = { host: "203.0.113.5", authMode: "register" };
+
+describe("a edição que faz a linha passar a entrar no agrupamento confere", () => {
+  // Cada caso: a linha dormente da A e a edição que, sem mexer no endereço, faz a linha entrar.
+  const cases: Array<{ name: string; dormant: Record<string, unknown>; wake: Record<string, unknown>; setup?: (id: string) => Promise<void> }> = [
+    { name: "a senha da linha por registro sem senha", dormant: { ...REGISTER, username: "conta100" }, wake: { password: "segredo" } },
+    { name: "o usuário da linha por registro sem usuário", dormant: { ...REGISTER, password: "segredo" }, wake: { username: "conta100", password: "segredo" } },
+    { name: "o usuário que o arquivo não aceita", dormant: { ...REGISTER, username: "joão", password: "segredo" }, wake: { username: "joao", password: "segredo" } },
+    { name: "a senha que começa com '>'", dormant: { ...REGISTER, username: "conta100", password: ">segredo" }, wake: { password: "segredo" } },
+    { name: "a senha com espaço na borda", dormant: { ...REGISTER, username: "conta100", password: "segredo " }, wake: { password: "segredo" } },
+    { name: "o destino de saída que é um bloco", dormant: { host: "203.0.113.5", authMode: "ip", outboundHost: "198.51.100.0/30" }, wake: { outboundHost: null } },
+    {
+      name: "a senha gravada que não dá para ler",
+      dormant: { ...REGISTER, username: "conta100", password: "segredo" },
+      wake: { password: "segredo" },
+      // O processo de voz deixa de fora a linha cuja senha não decifra (`planTrunks`).
+      setup: (id) => withSystem(panel.app, (q) => q.exec("update trunks set secret_enc = 'v1:lixo' where id = $1", [id])).then(() => undefined),
+    },
+  ];
+
+  for (const { name, dormant, wake, setup } of cases) {
+    it(`T15: ${name}: sem confirmação, 409 e 1 evento de recusa; com ela, salva e grava 1 evento de confirmação`, async () => {
+      if (setup) {
+        // A linha começa válida e fica ilegível só depois da linha da B, que então não é avisada.
+        const s = await dormantScene({ ...dormant, host: "198.51.100.9" });
+        await setup(s.id);
+        await withSystem(panel.app, (q) => q.exec("update trunks set host = '203.0.113.5' where id = $1", [s.id]));
+        await expectWakeConfers(s, wake);
+        return;
+      }
+      await expectWakeConfers(await dormantScene(dormant), wake);
+    });
+  }
+
+  async function expectWakeConfers(s: Awaited<ReturnType<typeof dormantScene>>, wake: Record<string, unknown>) {
+    const before = (await withSystem(panel.app, (q) => q.one<{ row: unknown }>("select to_jsonb(t) - 'updated_at' as row from trunks t where id = $1", [s.id])))?.row;
+    const refused = await s.edit(wake);
+    expect(refused).toMatchObject({ status: 409, code: "trunk_overlap_unconfirmed" });
+    expect((await withSystem(panel.app, (q) => q.one<{ row: unknown }>("select to_jsonb(t) - 'updated_at' as row from trunks t where id = $1", [s.id])))?.row).toEqual(before);
+    expect(await refusedEvents(s.a)).toHaveLength(1);
+    expect((await s.edit({ ...wake, confirmOverlap: true })).status).toBe(200);
+    expect(await confirmedEvents(s.a)).toHaveLength(1);
+    expect(await refusedEvents(s.b)).toEqual([]);
+  }
+
+  it("T16: a linha dormente que muda de endereço e segue dormente não confere nem gasta tentativa", async () => {
+    const s = await dormantScene({ ...REGISTER, username: "conta100" });
+    for (let index = 0; index < TRUNK_OVERLAP_CHECKS_PER_MINUTE + 2; index += 1) {
+      expect((await s.edit({ host: `203.0.113.${index % 2 === 0 ? 6 : 5}` })).status).toBe(200);
+    }
+    expect(await refusedEvents(s.a)).toEqual([]);
+  });
+
+  it("T16: a linha que sai do agrupamento não confere (tirar uma linha nunca tira outra do ar)", async () => {
+    const s = await scene();
+    const mine = await s.create({ host: "203.0.113.5", authMode: "ip", confirmOverlap: true });
+    const id = (mine.data as { id: string }).id;
+    expect((await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { outboundHost: "198.51.100.0/30" } })).status).toBe(200);
+    expect(await refusedEvents(s.a)).toEqual([]);
+  });
+
+  it("T18: criar na faixa da B a linha que ainda não entra no agrupamento não pergunta; a edição que a faz entrar, sim", async () => {
+    const s = await scene();
+    const mine = await s.create({ ...REGISTER, username: "conta100" });
+    expect(mine.status).toBe(200);
+    expect(await refusedEvents(s.a)).toEqual([]);
+    const id = (mine.data as { id: string }).id;
+    expect(await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { password: "segredo" } })).toMatchObject({
+      status: 409,
+      code: "trunk_overlap_unconfirmed",
+    });
+  });
+
+  it("T17: a linha da organização em exclusão não conta (o processo de voz já a deixou de fora)", async () => {
+    const c = await createOrganization(panel.app, `Organização C ${randomUUID().slice(0, 8)}`);
+    const personC = await createUser(panel.app, c, "owner");
+    expect((await call(createTrunk, { method: "POST", cookie: personC.cookie, body: { name: "Linha da C", host: "203.0.113.5", authMode: "ip" } })).status).toBe(200);
+    await withSystem(panel.app, (q) => q.exec("update organizations set deleting_at = $2 where id = $1", [c, NOW]));
+    // Com a C de fora, a linha da B está no ar; a linha por registro da A a tira do ar.
+    const s = await scene();
+    const body = { host: "203.0.113.6", authMode: "register", username: "conta100", password: "segredo" };
+    expect(await s.create(body)).toMatchObject({ status: 409, code: "trunk_overlap_unconfirmed" });
   });
 });

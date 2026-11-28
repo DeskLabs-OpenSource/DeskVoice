@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle, CircleNotch, Info, Warning, WarningOctagon } from "@phosphor-icons/react";
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import { useEffect, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
 export type Tone = "neutral" | "accent" | "ok" | "warn" | "fail";
 
@@ -166,6 +166,72 @@ export function Skeleton({ lines = 3 }: { lines?: number }) {
       {Array.from({ length: lines }, (_, index) => (
         <div key={index} className="h-12 animate-pulse rounded-sm bg-sunken" />
       ))}
+    </div>
+  );
+}
+
+/** A aba que uma tecla escolhe, pelo padrão de abas da ARIA (ativação automática); `null` quando a tecla não é das abas. */
+export function tabKeyTarget(key: string, index: number, count: number): number | null {
+  if (count === 0) return null;
+  if (key === "ArrowRight") return (index + 1) % count;
+  if (key === "ArrowLeft") return (index - 1 + count) % count;
+  if (key === "Home") return 0;
+  if (key === "End") return count - 1;
+  return null;
+}
+
+export const tabDomId = (base: string, id: string): string => `${base}-tab-${id}`;
+export const tabPanelDomId = (base: string, id: string): string => `${base}-panel-${id}`;
+
+/**
+ * A lista de abas (desenho 2026-11-26, seção 4.3). Só a aba ativa entra no Tab; as setas, Home e End
+ * trocam de aba. A ativa é marcada por um traço na cor do texto, nunca em cobre. Em tela estreita, a
+ * lista rola na horizontal, e a ativa rola para a vista.
+ */
+export function Tabs({ label, base, items, active, onSelect }: { label: string; base: string; items: readonly { id: string; label: string }[]; active: string; onSelect(id: string): void }) {
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    list.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [active]);
+  return (
+    <div className="min-w-0 border-b border-line">
+      <div ref={list} role="tablist" aria-label={label} className="flex gap-1 overflow-x-auto">
+        {items.map((item, index) => {
+          const selected = item.id === active;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              id={tabDomId(base, item.id)}
+              aria-selected={selected}
+              aria-controls={tabPanelDomId(base, item.id)}
+              tabIndex={selected ? 0 : -1}
+              onClick={() => onSelect(item.id)}
+              onKeyDown={(event) => {
+                const next = tabKeyTarget(event.key, index, items.length);
+                const target = next === null ? undefined : items[next];
+                if (!target) return;
+                event.preventDefault();
+                onSelect(target.id);
+                document.getElementById(tabDomId(base, target.id))?.focus();
+              }}
+              className="-mb-px shrink-0 cursor-pointer border-b-2 border-transparent px-3 py-2.5 whitespace-nowrap text-muted transition-colors duration-[120ms] ease-out hover:text-ink focus-visible:-outline-offset-2 aria-selected:border-ink aria-selected:font-bold aria-selected:text-ink"
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** O painel de uma aba. Fechado, ele continua montado (com `hidden`, sem a classe de grade que o mostraria): o que está nele não se perde. */
+export function TabPanel({ base, id, active, children }: { base: string; id: string; active: boolean; children: ReactNode }) {
+  return (
+    <div role="tabpanel" id={tabPanelDomId(base, id)} aria-labelledby={tabDomId(base, id)} data-tab={id} tabIndex={0} hidden={!active} className={active ? "grid gap-6" : undefined}>
+      {children}
     </div>
   );
 }

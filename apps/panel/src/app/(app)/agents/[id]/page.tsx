@@ -3,33 +3,32 @@
 import { CALLER_MESSAGE_ORG_PER_DAY, CALLER_MESSAGE_ORG_PER_HOUR, DROP_FOLLOW_UP_MESSAGE_MAX, dropFollowUpDefaultMessage } from "@deskvoice/core/drop-follow-up";
 import { ArrowLeft, Trash } from "@phosphor-icons/react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { use, useEffect, useState } from "react";
-import enTests from "../../../../i18n/en/agent-tests";
+import { useRouter, useSearchParams } from "next/navigation";
+import { use, useEffect, useRef, useState } from "react";
 import en from "../../../../i18n/en/agents";
 import enCommon from "../../../../i18n/en/common";
-import esTests from "../../../../i18n/es/agent-tests";
 import es from "../../../../i18n/es/agents";
 import esCommon from "../../../../i18n/es/common";
 import { fill } from "../../../../i18n/locales";
-import ptBRTests from "../../../../i18n/pt-BR/agent-tests";
 import ptBR from "../../../../i18n/pt-BR/agents";
 import ptBRCommon from "../../../../i18n/pt-BR/common";
 import { useDict } from "../../../../i18n/provider";
 import { api, useApi } from "../../../../ui/api";
 import { ActionStatus, ReadOnlyNotice, useAction, useErrorText } from "../../../../ui/errors";
 import { formatPhone } from "../../../../ui/format";
-import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TextArea, TextInput } from "../../../../ui/kit";
+import { Button, Field, Notice, Panel, Select, Skeleton, Switch, TabPanel, Tabs, TextArea, TextInput } from "../../../../ui/kit";
 import { useCanConfigure } from "../../../../ui/me";
 import { proposedLanguage } from "../../../../ui/proposed-language";
 import { GUIDED_ENGINES } from "../../settings/analysts/rules";
 import type { Agent, Analyst, DropFollowUp, Engine, ListeningEnvironment, Me, Person, Setting, ToolInfo } from "../../../../ui/types";
 import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../../../ui/vocabulary";
+import { agentTabs, changedTabs, DRAFT_TAB, FORM_TABS, hiddenTabOf, parseAgentTab, type AgentTab } from "./agent-tabs";
 import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
 import { AgentBrains } from "./brains";
 import { EngineField, newAgentEngine } from "./engine-field";
 import { PipelineBlock, usePipelineData } from "./pipeline-block";
 import { NO_PIECES, pipelineMissing, piecesOf, pipelineToSave, shownPieces, type PipelinePieces } from "./pipeline-pieces";
+import { AgentTestsTab } from "./tests/tests-tab";
 import { PIPELINE_BLOCK_ID, VoiceField } from "./voice-field";
 
 /** O agente como a API devolve, com quem lê a ligação dele (R4, fatia 5): nulo segue a organização. */
@@ -75,7 +74,11 @@ interface Draft {
 
 const BLANK: Draft = { name: "", roleLabel: "", greeting: "", instructions: "", engine: "", voiceId: "", language: "pt-BR", tools: [], transferTo: "", transferReturns: true, callerIdleGuard: true, maxMinutes: "10", costCeiling: "5.00", enabled: true, followUpOwner: "", listeningEnvironment: "normal", vocabulary: "", handoffTargets: [], dropFollowUp: "off", dropFollowUpMessage: "", analystId: "", analysis: { kind: "organization" }, pipelineOn: false, pieces: NO_PIECES };
 
+// Todo campo do rascunho tem a aba dele: um campo novo sem aba não compila.
+const DRAFT_TABS: Record<keyof Draft, AgentTab> = DRAFT_TAB;
+
 const VOCABULARY_FIELD_ID = "agent-vocabulary";
+const TABS_BASE = "agent";
 
 /** Os modos de "Quando a ligação cai" que a tela oferece: os outros só aparecem quando o caminho deles existir. */
 const DROP_FOLLOW_UP_OFFERED: readonly DropFollowUp[] = ["off", "task", "whatsapp", "call_back"];
@@ -121,8 +124,9 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const isNew = id === "new";
   const t = useDict(ptBR, en, es);
   const common = useDict(ptBRCommon, enCommon, esCommon);
-  const tests = useDict(ptBRTests, enTests, esTests);
   const router = useRouter();
+  // A aba vive no endereço (`?aba=`): o link pode ser copiado, e sem ela abre Agente (seção 4.2).
+  const tab = parseAgentTab(useSearchParams().get("aba"), isNew);
   const errorText = useErrorText();
   const canConfigure = useCanConfigure();
   const agent = useApi<AgentWithBrain>(isNew ? null : `/agents/${id}`);
@@ -144,6 +148,13 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const remove = useAction();
   // O agente novo espera `/auth/me`: o idioma que ele propõe é o da organização (R8, fatia 8a).
   const [draft, setDraft] = useState<Draft | null>(null);
+  // O rascunho como está gravado: a aba Testes diz quando há mudança não salva, e em qual aba.
+  const [savedDraft, setSavedDraft] = useState<Draft | null>(null);
+  // Testes lê dados que as outras abas não usam: só monta na primeira vez que a aba abre.
+  const [testsOpened, setTestsOpened] = useState(false);
+  // O campo que precisa do foco depois que a aba dele abrir (o obrigatório vazio, o vocabulário com erro).
+  const pendingField = useRef<{ field: HTMLElement; report: boolean; scroll: boolean } | null>(null);
+  const invalidSeen = useRef(false);
   const [confirming, setConfirming] = useState(false);
   // O que está gravado no servidor. `agent.data` não se atualiza sozinho depois de salvar, então o
   // aviso de rascunho precisa da cópia que o próprio salvar devolve.
@@ -165,6 +176,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   useEffect(() => {
     if (agent.data) {
       setDraft(toDraft(agent.data));
+      setSavedDraft(toDraft(agent.data));
       setSavedEnvironment(agent.data.listeningEnvironment ?? "normal");
       setSavedDropFollowUp(agent.data.dropFollowUp ?? "off");
       setSavedAnalysis(toAnalysisDraft(agent.data.analysisBrain));
@@ -184,6 +196,28 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   useEffect(() => {
     if (isNew && fallbackEngine) setDraft((current) => (current && current.engine === "" ? { ...current, engine: fallbackEngine } : current));
   }, [isNew, fallbackEngine, hasDraft]);
+  useEffect(() => {
+    if (tab === "testes") setTestsOpened(true);
+    const pending = pendingField.current;
+    if (!pending) return;
+    pendingField.current = null;
+    if (pending.scroll) pending.field.scrollIntoView({ block: "start" });
+    else pending.field.focus();
+    if (pending.report && pending.field instanceof HTMLInputElement) pending.field.reportValidity();
+  }, [tab]);
+  const selectTab = (next: AgentTab): void => router.replace(`/agents/${id}?aba=${next}`, { scroll: false });
+  /** Põe o foco num campo (ou rola até um bloco, com `scroll`), abrindo antes a aba dele quando ela está fechada. */
+  const reveal = (field: HTMLElement | null, report: boolean, scroll = false): void => {
+    if (!field) return;
+    const hidden = hiddenTabOf(field);
+    if (hidden === null) {
+      if (scroll) field.scrollIntoView({ block: "start" });
+      else field.focus();
+      return;
+    }
+    pendingField.current = { field, report, scroll };
+    selectTab(hidden);
+  };
 
   const back = (
     <Link href="/agents" className="inline-flex items-center gap-1.5 justify-self-start text-[0.93rem] font-bold text-muted hover:text-ink">
@@ -227,6 +261,14 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         : trustCaller.data.value !== true
           ? "not_trusted"
           : null;
+  // Com o conector `deskcomm` no contrato do CRM (#330, fatia 2), a mensagem sai pelo canal do CRM, e
+  // o texto da opção diz qual: o nome gravado do canal, ou "o que o CRM escolher". `null`: outro conector.
+  const crmChannel = ((): { label: string | null } | null => {
+    const value = whatsAppConnector.data?.value as { type?: unknown; crmUrl?: unknown; channelLabel?: unknown } | null | undefined;
+    if (value?.type !== "deskcomm" || typeof value.crmUrl !== "string") return null;
+    return { label: typeof value.channelLabel === "string" ? value.channelLabel : null };
+  })();
+  const messageOption = crmChannel === null ? t.dropFollowUpWhatsApp : crmChannel.label === null ? t.dropFollowUpCrmRule : fill(t.dropFollowUpCrm, { channel: crmChannel.label });
   // Por que a religação está indisponível, a mesma conferência da rota; `undefined` enquanto carrega.
   const callBackBlock: "outbound_disabled" | null | undefined = outboundPolicy.data === undefined ? undefined : outboundPolicy.data.enabled ? null : "outbound_disabled";
   // A regra é a da API (`checkVocabulary`): a tela diz o erro ao lado do campo e não manda nada.
@@ -234,7 +276,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
   const vocabularyError = vocabulary.result.ok ? undefined : vocabularyErrorText(vocabulary.result.problem, t);
   const submit = (): Promise<boolean> => {
     if (!vocabulary.result.ok) {
-      document.getElementById(VOCABULARY_FIELD_ID)?.focus();
+      reveal(document.getElementById(VOCABULARY_FIELD_ID), false);
       return Promise.resolve(false);
     }
     const terms = vocabulary.result.terms;
@@ -242,7 +284,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
     const toSave = pipelineToSave(draft.pipelineOn, draft.pieces, savedPipeline, pipelineData, pipelineData.brainModels);
     if ("missing" in toSave) {
       setPieceMissing(t.pipelineMissingPiece[toSave.missing]);
-      document.getElementById(PIPELINE_BLOCK_ID)?.scrollIntoView({ block: "start" });
+      reveal(document.getElementById(PIPELINE_BLOCK_ID), false, true);
       return Promise.resolve(false);
     }
     setPieceMissing("");
@@ -279,394 +321,453 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
       setSavedDropFollowUp(saved.dropFollowUp ?? "off");
       setSavedAnalysis(toAnalysisDraft(saved.analysisBrain));
       setSavedPipeline(storedChoice(saved));
-      if (isNew) router.replace(`/agents/${saved.id}`);
-      else setDraft(toDraft(saved));
+      if (isNew) router.replace(`/agents/${saved.id}${tab === "agente" ? "" : `?aba=${tab}`}`);
+      else {
+        setDraft(toDraft(saved));
+        setSavedDraft(toDraft(saved));
+      }
     });
   };
 
+  const tabs = agentTabs(isNew).map((item) => ({ id: item, label: t.tabs[item] }));
+  const firstUnsaved = savedDraft ? changedTabs(draft, savedDraft, DRAFT_TABS)[0] : undefined;
   return (
-    <form
-      className="grid gap-6"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
-      }}
-    >
+    <div className="grid gap-6">
       <header className="grid gap-3">
         {back}
         <h1 className="text-[1.75rem] leading-tight font-bold tracking-[-0.01em]">{isNew ? t.newTitle : draft.name || t.newTitle}</h1>
       </header>
       <ReadOnlyNotice />
-      {/* Os testes do agente moram na página deles (fatia 7c): aqui, só o link. */}
-      {isNew ? null : (
-        <Link href={`/agents/${id}/tests`} className="grid justify-self-start gap-0.5 rounded-md border border-line bg-surface px-4 py-3 hover:border-muted">
-          <span className="font-bold">{tests.link}</span>
-          <span className="text-[0.87rem] text-muted">{tests.linkLead}</span>
-        </Link>
-      )}
+      <Tabs label={fill(t.tabsLabel, { name: draft.name || t.newTitle })} base={TABS_BASE} items={tabs} active={tab} onSelect={(next) => selectTab(parseAgentTab(next, isNew))} />
 
-      <fieldset disabled={!canConfigure} className="grid gap-6">
-        <Panel title={t.identity}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={t.name}>
-              <TextInput value={draft.name} onChange={(event) => set("name", event.target.value)} required maxLength={80} />
-            </Field>
-            <Field label={t.role} hint={t.roleHint}>
-              <TextInput value={draft.roleLabel} onChange={(event) => set("roleLabel", event.target.value)} maxLength={80} />
-            </Field>
-          </div>
-          <div className="mt-5 grid gap-1.5 border-t border-line pt-5">
-            <Switch checked={draft.enabled} onChange={(next) => set("enabled", next)} label={t.enabledLabel} />
-            <p className="text-[0.87rem] text-muted">{t.enabledHint}</p>
-          </div>
-        </Panel>
+      {/* As quatro abas do formulário são pedaços do mesmo <form>: trocar de aba não perde nada e não salva nada. */}
+      <form
+        className="grid gap-6"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+        // Campo obrigatório numa aba fechada: o navegador barra o envio sem dizer nada, porque não consegue
+        // pôr o foco num campo escondido. Aqui a aba dele abre, e o campo ganha o foco e a mensagem.
+        // Só o primeiro inválido conta: é o que o navegador mostraria.
+        onInvalidCapture={(event) => {
+          if (invalidSeen.current) return;
+          invalidSeen.current = true;
+          setTimeout(() => {
+            invalidSeen.current = false;
+          }, 0);
+          if (event.target instanceof HTMLElement && hiddenTabOf(event.target) !== null) reveal(event.target, true);
+        }}
+      >
+        <fieldset disabled={!canConfigure} className="grid gap-6">
+          <TabPanel base={TABS_BASE} id="agente" active={tab === "agente"}>
+            <Panel title={t.identity}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label={t.name}>
+                  <TextInput value={draft.name} onChange={(event) => set("name", event.target.value)} required maxLength={80} />
+                </Field>
+                <Field label={t.role} hint={t.roleHint}>
+                  <TextInput value={draft.roleLabel} onChange={(event) => set("roleLabel", event.target.value)} maxLength={80} />
+                </Field>
+                {/* O idioma vale para as três peças (o que se ouve, o que se responde e a amostra da voz): fica na Identidade. */}
+                <Field label={t.language}>
+                  <TextInput mono value={draft.language} onChange={(event) => set("language", event.target.value)} required maxLength={20} />
+                </Field>
+              </div>
+              <div className="mt-5 grid gap-1.5 border-t border-line pt-5">
+                <Switch checked={draft.enabled} onChange={(next) => set("enabled", next)} label={t.enabledLabel} />
+                <p className="text-[0.87rem] text-muted">{t.enabledHint}</p>
+              </div>
+            </Panel>
 
-        <Panel title={t.conversation}>
-          <div className="grid gap-4">
-            <Field label={t.greeting} hint={t.greetingHint}>
-              <TextInput value={draft.greeting} onChange={(event) => set("greeting", event.target.value)} maxLength={1000} />
-            </Field>
-            <Field label={t.instructions} hint={t.instructionsHint}>
-              <TextArea value={draft.instructions} onChange={(event) => set("instructions", event.target.value)} rows={9} />
-            </Field>
-          </div>
-        </Panel>
+            <Panel title={t.conversation}>
+              <div className="grid gap-4">
+                <Field label={t.greeting} hint={t.greetingHint}>
+                  <TextInput value={draft.greeting} onChange={(event) => set("greeting", event.target.value)} maxLength={1000} />
+                </Field>
+                <Field label={t.instructions} hint={t.instructionsHint}>
+                  <TextArea value={draft.instructions} onChange={(event) => set("instructions", event.target.value)} rows={9} />
+                </Field>
+              </div>
+            </Panel>
 
-        <Panel title={t.vocabulary} description={t.vocabularyLead}>
-          <div className="max-w-xl">
-            <Field label={t.vocabularyField} hint={vocabularyCountText(vocabulary.count, t)} error={vocabularyError}>
-              <TextArea
-                id={VOCABULARY_FIELD_ID}
-                value={draft.vocabulary}
-                onChange={(event) => set("vocabulary", event.target.value)}
-                rows={6}
-                spellCheck={false}
-                aria-invalid={vocabularyError ? true : undefined}
-              />
-            </Field>
-          </div>
-        </Panel>
+            <Panel title={t.vocabulary} description={t.vocabularyLead}>
+              <div className="max-w-xl">
+                <Field label={t.vocabularyField} hint={vocabularyCountText(vocabulary.count, t)} error={vocabularyError}>
+                  <TextArea
+                    id={VOCABULARY_FIELD_ID}
+                    value={draft.vocabulary}
+                    onChange={(event) => set("vocabulary", event.target.value)}
+                    rows={6}
+                    spellCheck={false}
+                    aria-invalid={vocabularyError ? true : undefined}
+                  />
+                </Field>
+              </div>
+            </Panel>
 
-        <Panel title={t.voice}>
-          <div className="grid gap-4 md:grid-cols-3">
-            <EngineField
-              t={t}
-              engines={engines.data}
-              value={draft.engine}
-              pipelineOn={draft.pipelineOn}
-              missing={missing}
-              onChange={(nextId) => {
-                const next = engines.data?.find((candidate) => candidate.id === nextId);
-                setPieceMissing("");
-                // O Pipeline nunca vai em `engine` (a API recusa): o motor de antes fica guardado.
-                set("pipelineOn", next?.assembled === true);
-                if (next?.assembled === true) return;
-                set("engine", nextId);
-                // A voz de um motor não existe no outro: trocar de motor volta para a voz padrão.
-                if (!next?.voices.some((voice) => voice.id === draft.voiceId)) set("voiceId", "");
-              }}
-            />
-            {/* No Pipeline, a voz é a do bloco: a do motor não fala. */}
-            {draft.pipelineOn ? null : <VoiceField t={t} engine={engine} voiceId={draft.voiceId} language={draft.language} onChange={(next) => set("voiceId", next)} />}
-            <Field label={t.language}>
-              <TextInput mono value={draft.language} onChange={(event) => set("language", event.target.value)} required maxLength={20} />
-            </Field>
-          </div>
-          {noisyProven || draft.listeningEnvironment === "noisy" ? (
-            <div className="mt-4 max-w-md">
-              <Field label={t.listeningEnvironment} hint={t.listeningEnvironmentHint}>
-                <Select value={draft.listeningEnvironment} onChange={(event) => set("listeningEnvironment", event.target.value === "noisy" ? "noisy" : "normal")}>
-                  <option value="normal">{t.listeningEnvironmentNormal}</option>
-                  <option value="noisy">{t.listeningEnvironmentNoisy}</option>
-                </Select>
-              </Field>
-              {noisyProven ? null : (
-                <div className="mt-2">
-                  <Notice tone="warn">
-                    <p>{fill(t.listeningEnvironmentUnproven, { engine: engine?.label ?? draft.engine })}</p>
-                    <div>
-                      <Button type="button" onClick={() => set("listeningEnvironment", "normal")}>
-                        {t.listeningEnvironmentBackToNormal}
-                      </Button>
+            <Panel title={t.voice}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <EngineField
+                  t={t}
+                  engines={engines.data}
+                  value={draft.engine}
+                  pipelineOn={draft.pipelineOn}
+                  missing={missing}
+                  onChange={(nextId) => {
+                    const next = engines.data?.find((candidate) => candidate.id === nextId);
+                    setPieceMissing("");
+                    // O Pipeline nunca vai em `engine` (a API recusa): o motor de antes fica guardado.
+                    set("pipelineOn", next?.assembled === true);
+                    if (next?.assembled === true) return;
+                    set("engine", nextId);
+                    // A voz de um motor não existe no outro: trocar de motor volta para a voz padrão.
+                    if (!next?.voices.some((voice) => voice.id === draft.voiceId)) set("voiceId", "");
+                  }}
+                />
+                {/* No Pipeline, a voz é a do bloco: a do motor não fala. */}
+                {draft.pipelineOn ? null : <VoiceField t={t} engine={engine} voiceId={draft.voiceId} language={draft.language} onChange={(next) => set("voiceId", next)} />}
+              </div>
+              {noisyProven || draft.listeningEnvironment === "noisy" ? (
+                <div className="mt-4 max-w-md">
+                  <Field label={t.listeningEnvironment} hint={t.listeningEnvironmentHint}>
+                    <Select value={draft.listeningEnvironment} onChange={(event) => set("listeningEnvironment", event.target.value === "noisy" ? "noisy" : "normal")}>
+                      <option value="normal">{t.listeningEnvironmentNormal}</option>
+                      <option value="noisy">{t.listeningEnvironmentNoisy}</option>
+                    </Select>
+                  </Field>
+                  {noisyProven ? null : (
+                    <div className="mt-2">
+                      <Notice tone="warn">
+                        <p>{fill(t.listeningEnvironmentUnproven, { engine: engine?.label ?? draft.engine })}</p>
+                        <div>
+                          <Button type="button" onClick={() => set("listeningEnvironment", "normal")}>
+                            {t.listeningEnvironmentBackToNormal}
+                          </Button>
+                        </div>
+                      </Notice>
                     </div>
+                  )}
+                </div>
+              ) : (
+                // Sem o campo, a linha fica: é ela que conta a quem usa outro motor que o modo existe.
+                <p className="mt-4 max-w-md text-[0.87rem] text-muted">{t.listeningEnvironmentOnlyProven}</p>
+              )}
+              {backToNormalPending ? (
+                <div className="mt-2 max-w-md">
+                  <Notice tone="warn">
+                    <p>{t.listeningEnvironmentUnsaved}</p>
                   </Notice>
                 </div>
-              )}
-            </div>
-          ) : (
-            // Sem o campo, a linha fica: é ela que conta a quem usa outro motor que o modo existe.
-            <p className="mt-4 max-w-md text-[0.87rem] text-muted">{t.listeningEnvironmentOnlyProven}</p>
-          )}
-          {backToNormalPending ? (
-            <div className="mt-2 max-w-md">
-              <Notice tone="warn">
-                <p>{t.listeningEnvironmentUnsaved}</p>
-              </Notice>
-            </div>
-          ) : null}
-          {!draft.pipelineOn && engine && engine.requiresKey && !engine.keyConfigured ? (
-            <div className="mt-4">
-              <Notice tone="warn">
-                <p>{t.engineNoKey}</p>
-                <Link href="/settings/ai" className="font-bold underline underline-offset-4">
-                  {t.engineKeyLink}
-                </Link>
-              </Notice>
-            </div>
-          ) : null}
-          {!draft.pipelineOn && engine && !engine.requiresKey ? <p className="mt-4 text-[0.87rem] text-muted">{t.engineSimulated}</p> : null}
-        </Panel>
+              ) : null}
+              {!draft.pipelineOn && engine && engine.requiresKey && !engine.keyConfigured ? (
+                <div className="mt-4">
+                  <Notice tone="warn">
+                    <p>{t.engineNoKey}</p>
+                    <Link href="/settings/ai" className="font-bold underline underline-offset-4">
+                      {t.engineKeyLink}
+                    </Link>
+                  </Notice>
+                </div>
+              ) : null}
+              {!draft.pipelineOn && engine && !engine.requiresKey ? <p className="mt-4 text-[0.87rem] text-muted">{t.engineSimulated}</p> : null}
+            </Panel>
 
-        {/* O Pipeline: as peças vão no salvar quando o campo Motor está nele (fatia 6b). */}
-        {pipelineEngine ? <PipelineBlock t={t} pipeline={pipelineEngine} canConfigure={canConfigure} agentId={isNew ? null : id} data={pipelineData} pieces={pieces} onPieces={setPieces} /> : null}
+            {/* O Pipeline: as peças vão no salvar quando o campo Motor está nele (fatia 6b). */}
+            {pipelineEngine ? <PipelineBlock t={t} pipeline={pipelineEngine} canConfigure={canConfigure} agentId={isNew ? null : id} data={pipelineData} pieces={pieces} onPieces={setPieces} /> : null}
 
-        <AgentBrains
-          agentId={isNew ? null : id}
-          t={t}
-          engineLabel={engine?.label ?? draft.engine}
-          analysis={draft.analysis}
-          onChange={(next, accept) => {
-            set("analysis", next);
-            setAcceptUnmeasured(accept);
-          }}
-          costCeilingCents={Math.round(Number(draft.costCeiling.replace(",", ".")) * 100)}
-          analyst={analysts.data?.find((candidate) => candidate.id === draft.analystId) ?? null}
-          canConfigure={canConfigure}
-        />
+            <AgentBrains
+              agentId={isNew ? null : id}
+              t={t}
+              engineLabel={engine?.label ?? draft.engine}
+              analysis={draft.analysis}
+              onChange={(next, accept) => {
+                set("analysis", next);
+                setAcceptUnmeasured(accept);
+              }}
+              costCeilingCents={Math.round(Number(draft.costCeiling.replace(",", ".")) * 100)}
+              analyst={analysts.data?.find((candidate) => candidate.id === draft.analystId) ?? null}
+              canConfigure={canConfigure}
+            />
+          </TabPanel>
 
-        <Panel title={t.analyst} description={t.analystLead}>
-          <Field label={t.analyst} hint={t.analystHint}>
-            <Select value={draft.analystId} onChange={(event) => set("analystId", event.target.value)} className="max-w-sm">
-              <option value="">{t.analystNone}</option>
-              {analysts.data?.map((analyst) => (
-                <option key={analyst.id} value={analyst.id}>
-                  {analyst.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {/* O motor sem `guide` (o Gemini Live, desenho R6, seção 3.3): o analista lê, mas a orientação não chega. */}
-          {draft.analystId !== "" && draft.engine !== "" && !GUIDED_ENGINES.includes(draft.engine) ? (
-            <div className="mt-4 max-w-md">
-              <Notice tone="warn">
-                <p>{fill(t.analystEngineUnsupported, { engine: engine?.label ?? draft.engine })}</p>
-              </Notice>
-            </div>
-          ) : null}
-          <Link href="/settings/analysts" className="mt-4 inline-block text-[0.87rem] font-bold text-muted underline-offset-4 hover:text-ink hover:underline">
-            {t.analystLink}
-          </Link>
-        </Panel>
+          <TabPanel base={TABS_BASE} id="ferramentas" active={tab === "ferramentas"}>
+            <Panel title={t.tools} description={t.toolsLead}>
+              {tools.data?.length === 0 ? <p className="text-muted">{t.toolsEmpty}</p> : null}
+              <ul className="grid gap-1">
+                {tools.data?.map((tool) => {
+                  const checked = draft.tools.includes(tool.name);
+                  return (
+                    <li key={tool.name}>
+                      <label className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] gap-x-3 rounded-sm px-3 py-2.5 transition-colors duration-[120ms] hover:bg-sunken has-checked:bg-sunken">
+                        <input
+                          type="checkbox"
+                          className="mt-1 size-4 accent-(--dv-accent)"
+                          checked={checked}
+                          onChange={() => set("tools", checked ? draft.tools.filter((name) => name !== tool.name) : [...draft.tools, tool.name])}
+                        />
+                        <span className="data font-medium">{tool.name}</span>
+                        <span className="col-start-2 text-[0.87rem] text-muted">{tool.description}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Panel>
 
-        <Panel title={t.tools} description={t.toolsLead}>
-          {tools.data?.length === 0 ? <p className="text-muted">{t.toolsEmpty}</p> : null}
-          <ul className="grid gap-1">
-            {tools.data?.map((tool) => {
-              const checked = draft.tools.includes(tool.name);
-              return (
-                <li key={tool.name}>
-                  <label className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] gap-x-3 rounded-sm px-3 py-2.5 transition-colors duration-[120ms] hover:bg-sunken has-checked:bg-sunken">
-                    <input
-                      type="checkbox"
-                      className="mt-1 size-4 accent-(--dv-accent)"
-                      checked={checked}
-                      onChange={() => set("tools", checked ? draft.tools.filter((name) => name !== tool.name) : [...draft.tools, tool.name])}
-                    />
-                    <span className="data font-medium">{tool.name}</span>
-                    <span className="col-start-2 text-[0.87rem] text-muted">{tool.description}</span>
-                  </label>
-                </li>
-              );
-            })}
-          </ul>
-        </Panel>
-
-        <div className="grid gap-6 md:grid-cols-2">
-          <Panel title={t.transfer}>
-            <Field label={t.transferTo} hint={t.transferHint}>
-              <TextInput mono type="tel" value={draft.transferTo} onChange={(event) => set("transferTo", event.target.value)} />
-            </Field>
-            <div className="mt-4 grid gap-1">
-              <Switch checked={draft.transferReturns} onChange={(next) => set("transferReturns", next)} label={t.transferReturns} />
-              <p className="text-[0.87rem] text-muted">{t.transferReturnsHint}</p>
-            </div>
-          </Panel>
-          <Panel title={t.limits} description={t.limitsLead}>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label={t.maxMinutes}>
-                <TextInput mono type="number" min={1} max={120} value={draft.maxMinutes} onChange={(event) => set("maxMinutes", event.target.value)} required />
+            <Panel title={t.transfer}>
+              <Field label={t.transferTo} hint={t.transferHint}>
+                <TextInput mono type="tel" value={draft.transferTo} onChange={(event) => set("transferTo", event.target.value)} />
               </Field>
-              <Field label={t.costCeiling}>
-                <TextInput mono inputMode="decimal" value={draft.costCeiling} onChange={(event) => set("costCeiling", event.target.value)} required />
-              </Field>
-            </div>
-            <div className="mt-4 grid gap-1">
-              <Switch checked={draft.callerIdleGuard} onChange={(next) => set("callerIdleGuard", next)} label={t.callerIdleGuard} />
-              <p className="text-[0.87rem] text-muted">{t.callerIdleGuardHint}</p>
-            </div>
-          </Panel>
-        </div>
-
-        <Panel title={t.handoff} description={t.handoffLead}>
-          {team.data && others.length === 0 ? <p className="text-muted">{t.handoffEmpty}</p> : null}
-          <ul className="grid gap-1" aria-label={t.handoff}>
-            {others.map((other) => {
-              const checked = draft.handoffTargets.includes(other.id);
-              return (
-                <li key={other.id}>
-                  <label className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] gap-x-3 rounded-sm px-3 py-2.5 transition-colors duration-[120ms] hover:bg-sunken has-checked:bg-sunken">
-                    <input
-                      type="checkbox"
-                      className="mt-1 size-4 accent-(--dv-accent)"
-                      checked={checked}
-                      onChange={() => set("handoffTargets", checked ? draft.handoffTargets.filter((target) => target !== other.id) : [...draft.handoffTargets, other.id])}
-                    />
-                    <span className="font-medium">{other.name}</span>
-                    {other.roleLabel ? <span className="col-start-2 text-[0.87rem] text-muted">{other.roleLabel}</span> : null}
-                  </label>
-                </li>
-              );
-            })}
-          </ul>
-          <ul className="mt-4 grid list-disc gap-1 pl-5 text-[0.87rem] text-muted">
-            <li>{t.handoffWhen}</li>
-            <li>{t.handoffLimits}</li>
-            <li>{t.handoffMax}</li>
-          </ul>
-        </Panel>
-
-        <Panel title={t.followUps} description={t.followUpsLead}>
-          <Field label={t.followUpOwner} hint={t.followUpOwnerHint}>
-            <Select value={draft.followUpOwner} onChange={(event) => set("followUpOwner", event.target.value)} className="max-w-sm">
-              <option value="">{t.followUpOwnerTeam}</option>
-              {owners.data?.map((person) => (
-                <option key={person.id} value={person.id}>
-                  {person.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <div className="mt-4">
-            <Field label={t.dropFollowUp} hint={t.dropFollowUpDefinition}>
-              <Select
-                value={draft.dropFollowUp}
-                onChange={(event) => set("dropFollowUp", DROP_FOLLOW_UP_OFFERED.find((mode) => mode === event.target.value) ?? "off")}
-                className="max-w-sm"
-              >
-                <option value="off">{t.dropFollowUpOff}</option>
-                <option value="task">{t.dropFollowUpTask}</option>
-                {/* Indisponível: desabilitada, e o motivo e o caminho aparecem logo abaixo. Já escolhida, continua visível. */}
-                <option value="whatsapp" disabled={whatsAppBlock !== null && draft.dropFollowUp !== "whatsapp"}>
-                  {whatsAppBlock ? `${t.dropFollowUpWhatsApp} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpWhatsApp}
-                </option>
-                <option value="call_back" disabled={callBackBlock !== null && draft.dropFollowUp !== "call_back"}>
-                  {callBackBlock ? `${t.dropFollowUpCallBack} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpCallBack}
-                </option>
-                {DROP_FOLLOW_UP_OFFERED.includes(draft.dropFollowUp) ? null : (
-                  <option value={draft.dropFollowUp} disabled>
-                    {t.dropFollowUpOther}
-                  </option>
-                )}
-              </Select>
-            </Field>
-          </div>
-          {whatsAppBlock ? (
-            // O motivo da opção desabilitada e o caminho para resolver. Vira alerta só quando o modo
-            // escolhido é o que ficou indisponível: aí a mensagem não sai, e cada queda vira pendência.
-            draft.dropFollowUp === "whatsapp" ? (
-              <div className="mt-3 max-w-prose">
-                <Notice tone="fail">
-                  <p>{whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}</p>
-                  <Link href={whatsAppBlock === "not_connected" ? "/settings/whatsapp" : "/settings/whatsapp#avancado"} className="font-bold underline-offset-4 hover:underline">
-                    {t.dropFollowUpFixLink}
-                  </Link>
-                </Notice>
+              <div className="mt-4 grid gap-1">
+                <Switch checked={draft.transferReturns} onChange={(next) => set("transferReturns", next)} label={t.transferReturns} />
+                <p className="text-[0.87rem] text-muted">{t.transferReturnsHint}</p>
               </div>
-            ) : (
-              <p className="mt-2 max-w-prose text-[0.87rem] text-muted">
-                {whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}{" "}
-                <Link href={whatsAppBlock === "not_connected" ? "/settings/whatsapp" : "/settings/whatsapp#avancado"} className="font-bold text-ink underline-offset-4 hover:underline">
-                  {t.dropFollowUpFixLink}
-                </Link>
-              </p>
-            )
-          ) : null}
-          {callBackBlock ? (
-            // Como o WhatsApp: o motivo e o caminho; alerta só quando a religação já é o modo escolhido.
-            draft.dropFollowUp === "call_back" ? (
-              <div className="mt-3 max-w-prose">
-                <Notice tone="fail">
-                  <p>{t.dropFollowUpOutboundDisabled}</p>
-                  <Link href="/outbound" className="font-bold underline-offset-4 hover:underline">
-                    {t.dropFollowUpOutboundLink}
-                  </Link>
-                </Notice>
-              </div>
-            ) : (
-              <p className="mt-2 max-w-prose text-[0.87rem] text-muted">
-                {t.dropFollowUpOutboundDisabled}{" "}
-                <Link href="/outbound" className="font-bold text-ink underline-offset-4 hover:underline">
-                  {t.dropFollowUpOutboundLink}
-                </Link>
-              </p>
-            )
-          ) : null}
-          {draft.dropFollowUp === "call_back" ? (
-            // Quantas tentativas e quando (fixos no código, seção 3.6), e a lista de não ligar.
-            <div className="mt-4 grid max-w-prose gap-2">
-              <p className="text-[0.87rem] text-muted">{t.dropFollowUpCallBackHow}</p>
-              <p className="text-[0.87rem] text-muted">{t.dropFollowUpCallBackDoNotCall}</p>
-            </div>
-          ) : null}
-          {draft.dropFollowUp === "whatsapp" ? (
-            <div className="mt-4 grid max-w-prose gap-2">
-              <p className="text-[0.87rem] text-muted">{t.dropFollowUpBlockRisk}</p>
-              <Field label={t.dropFollowUpMessage} hint={t.dropFollowUpMessageWarning}>
-                <TextArea
-                  value={draft.dropFollowUpMessage}
-                  onChange={(event) => set("dropFollowUpMessage", event.target.value)}
-                  placeholder={me.data?.organizationName === undefined ? undefined : dropFollowUpDefaultMessage(draft.language, me.data.organizationName)}
-                  maxLength={DROP_FOLLOW_UP_MESSAGE_MAX}
-                  rows={3}
-                />
+            </Panel>
+            <Panel title={t.handoff} description={t.handoffLead}>
+              {team.data && others.length === 0 ? <p className="text-muted">{t.handoffEmpty}</p> : null}
+              <ul className="grid gap-1" aria-label={t.handoff}>
+                {others.map((other) => {
+                  const checked = draft.handoffTargets.includes(other.id);
+                  return (
+                    <li key={other.id}>
+                      <label className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] gap-x-3 rounded-sm px-3 py-2.5 transition-colors duration-[120ms] hover:bg-sunken has-checked:bg-sunken">
+                        <input
+                          type="checkbox"
+                          className="mt-1 size-4 accent-(--dv-accent)"
+                          checked={checked}
+                          onChange={() => set("handoffTargets", checked ? draft.handoffTargets.filter((target) => target !== other.id) : [...draft.handoffTargets, other.id])}
+                        />
+                        <span className="font-medium">{other.name}</span>
+                        {other.roleLabel ? <span className="col-start-2 text-[0.87rem] text-muted">{other.roleLabel}</span> : null}
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+              <ul className="mt-4 grid list-disc gap-1 pl-5 text-[0.87rem] text-muted">
+                <li>{t.handoffWhen}</li>
+                <li>{t.handoffLimits}</li>
+                <li>{t.handoffMax}</li>
+              </ul>
+            </Panel>
+
+            <Panel title={t.analyst} description={t.analystLead}>
+              <Field label={t.analyst} hint={t.analystHint}>
+                <Select value={draft.analystId} onChange={(event) => set("analystId", event.target.value)} className="max-w-sm">
+                  <option value="">{t.analystNone}</option>
+                  {analysts.data?.map((analyst) => (
+                    <option key={analyst.id} value={analyst.id}>
+                      {analyst.name}
+                    </option>
+                  ))}
+                </Select>
               </Field>
-              <p className="text-[0.87rem] text-muted">{fill(t.dropFollowUpMessageLimits, { perHour: CALLER_MESSAGE_ORG_PER_HOUR, perDay: CALLER_MESSAGE_ORG_PER_DAY })}</p>
-            </div>
-          ) : null}
-        </Panel>
-      </fieldset>
+              {/* O motor sem `guide` (o Gemini Live, desenho R6, seção 3.3): o analista lê, mas a orientação não chega. */}
+              {draft.analystId !== "" && draft.engine !== "" && !GUIDED_ENGINES.includes(draft.engine) ? (
+                <div className="mt-4 max-w-md">
+                  <Notice tone="warn">
+                    <p>{fill(t.analystEngineUnsupported, { engine: engine?.label ?? draft.engine })}</p>
+                  </Notice>
+                </div>
+              ) : null}
+              <Link href="/settings/analysts" className="mt-4 inline-block text-[0.87rem] font-bold text-muted underline-offset-4 hover:text-ink hover:underline">
+                {t.analystLink}
+              </Link>
+            </Panel>
+          </TabPanel>
 
-      {canConfigure ? (
-        <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center gap-3 border-t border-line bg-bg px-4 py-3 lg:-mx-10 lg:px-10">
-          <Button type="submit" variant="primary" busy={save.busy}>
-            {common.actions.save}
-          </Button>
-          <ActionStatus action={save} />
-          {pieceMissing ? <Notice tone="fail">{pieceMissing}</Notice> : null}
-          {!isNew && !confirming ? (
-            <Button variant="ghost" className="ml-auto" icon={<Trash size={18} weight="duotone" aria-hidden />} onClick={() => setConfirming(true)}>
-              {t.delete}
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+          <TabPanel base={TABS_BASE} id="depois" active={tab === "depois"}>
+            <Panel title={t.followUps} description={t.followUpsLead}>
+              <Field label={t.followUpOwner} hint={t.followUpOwnerHint}>
+                <Select value={draft.followUpOwner} onChange={(event) => set("followUpOwner", event.target.value)} className="max-w-sm">
+                  <option value="">{t.followUpOwnerTeam}</option>
+                  {owners.data?.map((person) => (
+                    <option key={person.id} value={person.id}>
+                      {person.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <div className="mt-4">
+                <Field label={t.dropFollowUp} hint={t.dropFollowUpDefinition}>
+                  <Select
+                    value={draft.dropFollowUp}
+                    onChange={(event) => set("dropFollowUp", DROP_FOLLOW_UP_OFFERED.find((mode) => mode === event.target.value) ?? "off")}
+                    className="max-w-sm"
+                  >
+                    <option value="off">{t.dropFollowUpOff}</option>
+                    <option value="task">{t.dropFollowUpTask}</option>
+                    {/* Indisponível: desabilitada, e o motivo e o caminho aparecem logo abaixo. Já escolhida, continua visível. */}
+                    <option value="whatsapp" disabled={whatsAppBlock !== null && draft.dropFollowUp !== "whatsapp"}>
+                      {whatsAppBlock ? `${messageOption} (${t.dropFollowUpWhatsAppUnavailable})` : messageOption}
+                    </option>
+                    <option value="call_back" disabled={callBackBlock !== null && draft.dropFollowUp !== "call_back"}>
+                      {callBackBlock ? `${t.dropFollowUpCallBack} (${t.dropFollowUpWhatsAppUnavailable})` : t.dropFollowUpCallBack}
+                    </option>
+                    {DROP_FOLLOW_UP_OFFERED.includes(draft.dropFollowUp) ? null : (
+                      <option value={draft.dropFollowUp} disabled>
+                        {t.dropFollowUpOther}
+                      </option>
+                    )}
+                  </Select>
+                </Field>
+              </div>
+              {whatsAppBlock ? (
+                // O motivo da opção desabilitada e o caminho para resolver. Vira alerta só quando o modo
+                // escolhido é o que ficou indisponível: aí a mensagem não sai, e cada queda vira pendência.
+                draft.dropFollowUp === "whatsapp" ? (
+                  <div className="mt-3 max-w-prose">
+                    <Notice tone="fail">
+                      <p>{whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}</p>
+                      <Link href={whatsAppBlock === "not_connected" ? "/settings/whatsapp" : "/settings/whatsapp#avancado"} className="font-bold underline-offset-4 hover:underline">
+                        {t.dropFollowUpFixLink}
+                      </Link>
+                    </Notice>
+                  </div>
+                ) : (
+                  <p className="mt-2 max-w-prose text-[0.87rem] text-muted">
+                    {whatsAppBlock === "not_connected" ? t.dropFollowUpNotConnected : t.dropFollowUpNotTrusted}{" "}
+                    <Link href={whatsAppBlock === "not_connected" ? "/settings/whatsapp" : "/settings/whatsapp#avancado"} className="font-bold text-ink underline-offset-4 hover:underline">
+                      {t.dropFollowUpFixLink}
+                    </Link>
+                  </p>
+                )
+              ) : null}
+              {callBackBlock ? (
+                // Como o WhatsApp: o motivo e o caminho; alerta só quando a religação já é o modo escolhido.
+                draft.dropFollowUp === "call_back" ? (
+                  <div className="mt-3 max-w-prose">
+                    <Notice tone="fail">
+                      <p>{t.dropFollowUpOutboundDisabled}</p>
+                      <Link href="/outbound" className="font-bold underline-offset-4 hover:underline">
+                        {t.dropFollowUpOutboundLink}
+                      </Link>
+                    </Notice>
+                  </div>
+                ) : (
+                  <p className="mt-2 max-w-prose text-[0.87rem] text-muted">
+                    {t.dropFollowUpOutboundDisabled}{" "}
+                    <Link href="/outbound" className="font-bold text-ink underline-offset-4 hover:underline">
+                      {t.dropFollowUpOutboundLink}
+                    </Link>
+                  </p>
+                )
+              ) : null}
+              {draft.dropFollowUp === "call_back" ? (
+                // Quantas tentativas e quando (fixos no código, seção 3.6), e a lista de não ligar.
+                <div className="mt-4 grid max-w-prose gap-2">
+                  <p className="text-[0.87rem] text-muted">{t.dropFollowUpCallBackHow}</p>
+                  <p className="text-[0.87rem] text-muted">{t.dropFollowUpCallBackDoNotCall}</p>
+                </div>
+              ) : null}
+              {draft.dropFollowUp === "whatsapp" ? (
+                <div className="mt-4 grid max-w-prose gap-2">
+                  <p className="text-[0.87rem] text-muted">{crmChannel === null ? t.dropFollowUpBlockRisk : t.dropFollowUpCrmRisk}</p>
+                  <Field label={t.dropFollowUpMessage} hint={t.dropFollowUpMessageWarning}>
+                    <TextArea
+                      value={draft.dropFollowUpMessage}
+                      onChange={(event) => set("dropFollowUpMessage", event.target.value)}
+                      placeholder={me.data?.organizationName === undefined ? undefined : dropFollowUpDefaultMessage(draft.language, me.data.organizationName)}
+                      maxLength={DROP_FOLLOW_UP_MESSAGE_MAX}
+                      rows={3}
+                    />
+                  </Field>
+                  <p className="text-[0.87rem] text-muted">{fill(t.dropFollowUpMessageLimits, { perHour: CALLER_MESSAGE_ORG_PER_HOUR, perDay: CALLER_MESSAGE_ORG_PER_DAY })}</p>
+                </div>
+              ) : null}
+            </Panel>
+          </TabPanel>
 
-      {confirming ? (
-        <Notice tone="fail">
-          <p>{fill(t.deleteConfirm, { name: draft.name })}</p>
-          {/* O que vai junto: o agente sai da lista de destinos de quem o tinha marcado. */}
-          {handingOffHere.length > 0 ? <p>{fill(t.deleteHandoffTargets, { name: draft.name, agents: handingOffHere.map((other) => other.name).join(", ") })}</p> : null}
-          <div className="mt-1 flex flex-wrap gap-2">
-            <Button variant="danger" busy={remove.busy} onClick={() => void remove.run(() => api(`/agents/${id}`, { method: "DELETE" })).then((ok) => ok && router.replace("/agents"))}>
-              {fill(t.deleteYes, { name: draft.name })}
-            </Button>
-            <Button variant="ghost" onClick={() => setConfirming(false)}>
-              {common.actions.cancel}
-            </Button>
-          </div>
-          {remove.error ? <p className="text-fail">{remove.error}</p> : null}
-        </Notice>
-      ) : null}
-    </form>
+          <TabPanel base={TABS_BASE} id="avancado" active={tab === "avancado"}>
+            <Panel title={t.limits} description={t.limitsLead}>
+              <div className="grid grid-cols-2 gap-4">
+                <Field label={t.maxMinutes}>
+                  <TextInput mono type="number" min={1} max={120} value={draft.maxMinutes} onChange={(event) => set("maxMinutes", event.target.value)} required />
+                </Field>
+                <Field label={t.costCeiling}>
+                  <TextInput mono inputMode="decimal" value={draft.costCeiling} onChange={(event) => set("costCeiling", event.target.value)} required />
+                </Field>
+              </div>
+              <div className="mt-4 grid gap-1">
+                <Switch checked={draft.callerIdleGuard} onChange={(next) => set("callerIdleGuard", next)} label={t.callerIdleGuard} />
+                <p className="text-[0.87rem] text-muted">{t.callerIdleGuardHint}</p>
+              </div>
+            </Panel>
+            <Panel title={t.organizationSettings} description={t.organizationSettingsLead}>
+              <ul className="grid gap-2">
+                {(
+                  [
+                    ["/settings/privacy", t.organizationPrivacy],
+                    ["/settings/privacy", t.organizationRecording],
+                    ["/settings/integrations", t.organizationWebhooks],
+                  ] as const
+                ).map(([href, label]) => (
+                  <li key={label}>
+                    <Link href={href} className="font-bold underline-offset-4 hover:underline">
+                      {label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          </TabPanel>
+
+        </fieldset>
+
+        {/* O rodapé só nas abas do formulário: Testes tem os botões dele. */}
+        {FORM_TABS.includes(tab) ? (
+          <>
+            {canConfigure ? (
+              <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center gap-3 border-t border-line bg-bg px-4 py-3 lg:-mx-10 lg:px-10">
+                <Button type="submit" variant="primary" busy={save.busy}>
+                  {common.actions.save}
+                </Button>
+                <ActionStatus action={save} />
+                {pieceMissing ? <Notice tone="fail">{pieceMissing}</Notice> : null}
+                {!isNew && !confirming ? (
+                  <Button variant="ghost" className="ml-auto" icon={<Trash size={18} weight="duotone" aria-hidden />} onClick={() => setConfirming(true)}>
+                    {t.delete}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {confirming ? (
+              <Notice tone="fail">
+                <p>{fill(t.deleteConfirm, { name: draft.name })}</p>
+                {/* O que vai junto: o agente sai da lista de destinos de quem o tinha marcado. */}
+                {handingOffHere.length > 0 ? <p>{fill(t.deleteHandoffTargets, { name: draft.name, agents: handingOffHere.map((other) => other.name).join(", ") })}</p> : null}
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <Button variant="danger" busy={remove.busy} onClick={() => void remove.run(() => api(`/agents/${id}`, { method: "DELETE" })).then((ok) => ok && router.replace("/agents"))}>
+                    {fill(t.deleteYes, { name: draft.name })}
+                  </Button>
+                  <Button variant="ghost" onClick={() => setConfirming(false)}>
+                    {common.actions.cancel}
+                  </Button>
+                </div>
+                {remove.error ? <p className="text-fail">{remove.error}</p> : null}
+              </Notice>
+            ) : null}
+          </>
+        ) : null}
+      </form>
+
+      {isNew ? null : (
+        <TabPanel base={TABS_BASE} id="testes" active={tab === "testes"}>
+          {firstUnsaved && canConfigure ? (
+            <Notice tone="warn">
+              <p>{t.unsavedChanges}</p>
+              <div>
+                <Button type="button" onClick={() => selectTab(firstUnsaved)}>
+                  {fill(t.unsavedGoTo, { tab: t.tabs[firstUnsaved] })}
+                </Button>
+              </div>
+            </Notice>
+          ) : null}
+          {testsOpened ? <AgentTestsTab id={id} /> : null}
+        </TabPanel>
+      )}
+    </div>
   );
 }

@@ -28,6 +28,7 @@ export const INSTALLATION_EVENT_KINDS = [
   "support_access_ended",
   "update_requested",
   "trunk_overlap_refused",
+  "trunk_overlap_confirmed",
 ] as const;
 export type InstallationEventKind = (typeof INSTALLATION_EVENT_KINDS)[number];
 
