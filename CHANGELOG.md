@@ -3,6 +3,32 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.55.0] - 2026-11-28
+
+### Adicionado
+
+- **Na seção dos servidores MCP, cada ferramenta pode pedir a aprovação de uma pessoa antes de cada uso** Em Configurações → Integrações, na seção "Servidores de ferramentas (MCP)", cada ferramenta ganha a caixa "Pedir aprovação de uma pessoa antes de cada uso", desmarcada de fábrica. Marcada, a ferramenta espera a decisão de alguém da equipe antes de rodar. Enquanto isso, quem liga ouve uma frase de espera no idioma do agente, por até 2 minutos. Sem resposta no prazo, vale o padrão de aprovações da organização, que de fábrica é negar, e nunca o que o agente pedir: com o padrão em aprovar, a ferramenta roda sem ninguém ter aprovado. A pergunta leva o nome da ferramenta, o servidor e os dados que vão ser enviados, cortados em 1.000 caracteres, sem o endereço do servidor. Negada, a ferramenta não chama o servidor. Buscar de novo desmarca a caixa da ferramenta que mudou no servidor. **A ligação ainda não oferece as ferramentas MCP ao agente:** a marca fica gravada para quando ela oferecer, e por enquanto nenhuma ligação pede essa aprovação. Quem já instalou não precisa fazer nada. Crédito: @melgarafael.
+
+### Alterado
+
+- **O log do Asterisk passa a guardar semanas, e não cerca de um dia** O `docker compose -f deploy/docker-compose.yml logs asterisk` guardava cerca de um dia: os avisos
+  NOTICE do Asterisk eram quase todo o volume e enchiam o teto do log. Eles saem desse log; ficam a
+  partida do Asterisk, o caminho de cada ligação, os avisos (WARNING) e os erros (ERROR). Com isso o
+  log guarda cerca de quatro semanas (medido sem ligações, na instalação de prova); cada ligação soma, e com muito movimento
+  cabe menos. A linha "Log do Asterisk" de `bash install/healthcheck.sh` diz desde quando o log da
+  sua instalação guarda. A ligação recusada antes do dialplan ("No matching endpoint found", de um
+  endereço que nenhuma linha reconhece, e "extension not found", de um número fora do dialplan) também
+  sai desse log, porque o Asterisk a escreve como NOTICE; para ver o motivo, o `install/README.md`
+  (linha "Log do Asterisk") traz um registro temporário, que pede acesso ao servidor. Para guardar mais tempo, copie o log para um arquivo antes
+  (`docker compose -f deploy/docker-compose.yml logs -t asterisk > asterisk.log`), ou dê ao serviço
+  `asterisk` do `deploy/docker-compose.yml` um `logging` próprio, com `max-size` e `max-file`
+  maiores, sabendo que a atualização sobrescreve esse arquivo. Nada a fazer além de atualizar: a configuração nova do log
+  entra sem reiniciar o Asterisk e sem derrubar ligação. Crédito: @melgarafael.
+
+### Corrigido
+
+- **Configurações → Integrações — duas gravações de servidor MCP ao mesmo tempo não se perdem mais** Em Configurações → Integrações, dois cadastros de servidor MCP feitos ao mesmo tempo na mesma organização podiam se atropelar: com o mesmo identificador, o segundo sobrescrevia o primeiro em vez de receber o aviso de que ele já existe; com identificadores diferentes, um dos dois sumia sem aviso. Agora as gravações dos servidores MCP de uma organização entram uma de cada vez: com o mesmo identificador, o segundo pedido recebe o aviso de servidor já cadastrado, e com identificadores diferentes os dois ficam gravados. O mesmo vale para descadastrar um servidor enquanto outro é gravado. Nada a configurar. Contexto: a observação do Verificador 2 no #563. Crédito: @melgarafael.
+
 ## [0.54.0] - 2026-11-28
 
 ### Adicionado
