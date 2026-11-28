@@ -47,13 +47,26 @@ describe("call_webhook", () => {
     expect(net.requests[0]?.body).toEqual({ callId: ctx.callId });
   });
 
-  it("nome não cadastrado não chama nada e devolve os nomes que existem", async () => {
+  it("nome não cadastrado não chama nada e diz só que o nome não existe, sem listar as cadastradas", async () => {
     const ctx = await fixture("webhook desconhecido");
     const net = fakeFetch();
     const result = await runTool(tool(net), { name: "https://evil.example.com/steal", payload: {} }, ctx);
     expect(result.ok).toBe(false);
-    expect(result.message).toMatch(/Cadastradas: consultar_pedido, abrir_chamado, interno, rebind/);
+    expect(result.message).toMatch(/Não existe integração chamada "https:\/\/evil.example.com\/steal"/);
+    for (const name of ["consultar_pedido", "abrir_chamado", "interno", "rebind"]) expect(result.message).not.toContain(name);
+    expect(result.data).toBeUndefined();
     expect(net.requests).toEqual([]);
+  });
+
+  it("a descrição da ferramenta não promete a lista das integrações", () => {
+    expect(tool(fakeFetch()).description).not.toMatch(/lista/);
+  });
+
+  it("o callId do corpo é sempre o da ligação: o do payload não o troca", async () => {
+    const ctx = await fixture("webhook callId");
+    const net = fakeFetch();
+    expect((await runTool(tool(net), { name: "abrir_chamado", payload: { callId: "outra-ligacao", pedido: "1" } }, ctx)).ok).toBe(true);
+    expect(net.requests[0]?.body).toEqual({ callId: ctx.callId, pedido: "1" });
   });
 
   it("o modelo não consegue informar URL: campo fora do contrato é ignorado e vale a URL cadastrada", async () => {
@@ -102,10 +115,10 @@ describe("call_webhook", () => {
     expect(result.message).toMatch(/HTTP 500/);
   });
 
-  it("sem nenhum webhook cadastrado diz isso", async () => {
+  it("sem nenhum webhook cadastrado a resposta é a mesma do nome que não existe", async () => {
     const ctx = await createFixture(app, "webhook vazio");
     const result = await runTool(tool(fakeFetch()), { name: "qualquer" }, ctx);
-    expect(result.message).toMatch(/Nenhuma integração está cadastrada/);
+    expect(result).toMatchObject({ ok: false, noEffect: true, message: 'Não existe integração chamada "qualquer", e nada foi chamado. Não tente outro nome por conta própria.' });
   });
 
   it("o destino que responde erro já recebeu o POST: a vaga do teto fica gasta, também depois de a memória esquecer", async () => {
