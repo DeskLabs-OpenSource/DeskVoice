@@ -178,6 +178,20 @@ const loadOne = async (q: OrgQuery, deps: ServerDeps, slug: string) => {
   return { servers, server: servers.find((item) => item.slug === slug) };
 };
 
+/**
+ * Serializa as gravações dos servidores MCP de uma organização até o fim da transação. Um `FOR UPDATE`
+ * na leitura não bastaria: antes do primeiro servidor a linha de `settings` não existe, e duas
+ * criações leriam a lista vazia e a segunda sobrescreveria a primeira. A trava vale também sem linha.
+ */
+const lockServers = (q: OrgQuery): Promise<number> =>
+  q.exec("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`deskvoice:${MCP_SERVERS_KEY}:${q.organizationId}`]);
+
+/** A lista e o servidor, lidos depois da trava: quem grava a partir dela não perde a gravação de outro pedido. */
+const loadLocked = async (q: OrgQuery, deps: ServerDeps, slug: string) => {
+  await lockServers(q);
+  return loadOne(q, deps, slug);
+};
+
 /** Lê o servidor gravado fora da transação da rota: é para montar a busca que vem antes dela. */
 export const storedServer = (deps: ServerDeps, session: Session, slug: string): Promise<RegisteredMcpServer | undefined> =>
   withOrg(deps.db, session.organizationId, async (q) => (await loadOne(q, deps, slug)).server);
@@ -199,8 +213,9 @@ export interface Looked {
  * existir na busca com a mesma impressão digital; o que não bate é recusado, e nada muda.
  */
 export async function saveServer(q: OrgQuery, deps: ServerDeps, slug: string, body: z.output<typeof saveBody>, looked: Looked): Promise<McpServerView & { droppedFrom: string[] }> {
-  const { servers, server: previous } = await loadOne(q, deps, slug);
-  // De novo dentro da transação: outro pedido pode ter criado o mesmo `slug` depois da busca.
+  const { servers, server: previous } = await loadLocked(q, deps, slug);
+  // De novo dentro da transação, depois da trava: outro pedido pode ter criado o mesmo `slug` depois
+  // da busca, e o simultâneo espera este terminar e recebe o 409.
   refuseTaken(body.create, previous);
   const keptSecret = secretFor(previous, body);
   // O gravado mudou entre a busca e a transação: a busca foi feita com outra credencial.
@@ -299,7 +314,7 @@ export function refreshView(server: RegisteredMcpServer, list: McpToolList) {
 
 /** Descadastra: some o servidor, e os nomes `<slug>__*` saem de todo agente da organização, na mesma transação. */
 export async function removeServer(q: OrgQuery, deps: ServerDeps, slug: string): Promise<{ slug: string; droppedFrom: string[] }> {
-  const { servers, server } = await loadOne(q, deps, slug);
+  const { servers, server } = await loadLocked(q, deps, slug);
   if (!server) throw new ApiError(404, "not_found", "Not found.");
   const names = [...new Set((await agentsUsing(q, slug)).flatMap((agent) => agent.tools))];
   await writeServers(
