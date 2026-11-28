@@ -287,7 +287,7 @@ export interface Engine {
    */
   assembled?: true;
   /** Só no pipeline: por que ele está desligado neste servidor, ou `null` quando a pasta já tem o que falta. */
-  unavailable?: { reason: "no_live_transcriber" } | null;
+  unavailable?: { reason: "no_live_transcriber" | "no_transcriber_key" } | null;
 }
 
 /** Os motores que um agente pode ter em `engine`: todos menos o pipeline, que monta as peças (fatia 5b-1). */

@@ -11,7 +11,7 @@ export * from "./brain";
 export { loadBrains } from "./brain-load";
 // O motor pipeline mora em `engines/pipeline.ts` (fatia 5b-1) e é descoberto pela pasta, como os outros:
 // quem abre a ligação o acha em `loadEngines()` por `isPipelineEngine`, e o contrato fica em `types.ts`.
-export { pipelineChoice, pricePipeline, readConsent, synthesizerConsentSetting, type PieceConsent, type PipelineChoice, type UnpricedPiece } from "./pipeline-choice";
+export { pipelineChoice, pricePipeline, readConsent, synthesizerConsentSetting, transcriberConsentSetting, transcriberKeySettingOf, type PieceConsent, type PipelineChoice, type UnpricedPiece } from "./pipeline-choice";
 export * from "./speech-filter";
 export * from "./analyst";
 export { createSimulatedDecider, neutralAnswers } from "./deciders/simulated";

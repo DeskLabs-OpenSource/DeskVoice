@@ -253,8 +253,10 @@ test("o aviso de gravação mora em Privacidade e dados, acima da gravação; sa
     const block = page.locator("#aviso-de-gravacao");
     await expect(block.getByRole("heading", { name: settings.recordingTitle, exact: true })).toBeInViewport();
 
-    // B3: logo acima da gravação das chamadas, o primeiro bloco do painel de privacidade.
-    const headings = page.getByRole("main").getByRole("heading", { level: 2 });
+    // B3: logo acima da gravação das chamadas, o primeiro bloco do painel de privacidade. O aviso de
+    // Limites é do layout de Configurações, e não da página: aparece quando a organização tem trava, como
+    // a do instalador, que nasce com a saída travada (convenção 14).
+    const headings = page.getByRole("main").getByRole("heading", { level: 2 }).filter({ hasNotText: new RegExp(`^${settings.limits.title}$`) });
     await expect(headings.nth(0)).toHaveText(settings.recordingTitle);
     await expect(headings.nth(1)).toHaveText(privacy.recordingTitle);
 

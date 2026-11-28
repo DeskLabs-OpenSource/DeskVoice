@@ -42,6 +42,7 @@ beforeEach(() => trunkOverlapLimiter.clear());
 afterAll(() => panel.close());
 
 const stored = <T>(sql: string, params: unknown[] = []) => withOrg(panel.app, org, (q) => q.one<Record<string, T>>(sql, params));
+const refusalOf = (result: { status: number; code?: string }) => [result.status, result.code];
 const newAgent = async (name: string): Promise<string> =>
   ((await call(createAgent, { method: "POST", cookie: owner, body: { name, engine: "simulated" } })).data as { id: string }).id;
 
@@ -352,6 +353,68 @@ describe("secrets", () => {
     expect(replaced.status).toBe(200);
     const row = await stored<{ url: string; token: string }>("select value from settings where key = $1", [params.key]);
     expect([row?.value?.url, decryptSecret(row?.value?.token ?? "", SECRET_KEY)]).toEqual(["https://new.example.test/wa", "brand-new-token"]);
+  });
+
+  it("the deskcomm connector with the CRM address keeps the address and the channel, and the token stays with the same CRM", async () => {
+    const params = { key: "whatsapp.connector" };
+    const token = "dsk_token-do-crm";
+    const put = (value: unknown) => call(putSetting, { method: "PUT", cookie: owner, params, body: { value } });
+    const row = () => stored<Record<string, string>>("select value from settings where key = $1", [params.key]);
+    const crmUrl = "https://crm.example.test";
+    const channel = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c77";
+
+    // Com o endereço do CRM, a `url` gravada é o mesmo endereço, sem a barra final.
+    const saved = await put({ type: "deskcomm", url: `${crmUrl}/`, crmUrl: `${crmUrl}/`, token });
+    expect(saved.data).toEqual({ key: params.key, value: { type: "deskcomm", url: crmUrl, crmUrl, token: { configured: true } } });
+    expect(saved.text).not.toContain(token);
+
+    // Escolher o canal no mesmo CRM, sem token: o gravado continua, e o canal volta na leitura.
+    const withChannel = await put({ type: "deskcomm", url: crmUrl, crmUrl, channelSessionId: channel, channelLabel: "Número da loja" });
+    expect(withChannel.data).toEqual({ key: params.key, value: { type: "deskcomm", url: crmUrl, crmUrl, channelSessionId: channel, channelLabel: "Número da loja", token: { configured: true } } });
+    expect(decryptSecret((await row())?.value?.token ?? "", SECRET_KEY)).toBe(token);
+
+    // Voltar à regra do CRM tira o canal e mantém o token.
+    await put({ type: "deskcomm", url: crmUrl, crmUrl });
+    expect(await row()).toMatchObject({ value: { type: "deskcomm", url: crmUrl, crmUrl } });
+    expect((await row())?.value).not.toHaveProperty("channelSessionId");
+    expect(decryptSecret((await row())?.value?.token ?? "", SECRET_KEY)).toBe(token);
+  });
+
+  it("never carries the token to another CRM, nor between the old format and the CRM contract on the same address", async () => {
+    const params = { key: "whatsapp.connector" };
+    const put = (value: unknown) => call(putSetting, { method: "PUT", cookie: owner, params, body: { value } });
+    const before = async () => stored<unknown>("select value from settings where key = $1", [params.key]);
+
+    await put({ type: "deskcomm", url: "https://crm.example.test", token: "legado" });
+    const legacy = await before();
+    // O mesmo endereço passando a ser lido como CRM: o token foi dado a um intermediário, e não ao CRM.
+    expect(refusalOf(await put({ type: "deskcomm", url: "https://crm.example.test", crmUrl: "https://crm.example.test" }))).toEqual([400, "token_required"]);
+    expect(await before()).toEqual(legacy);
+
+    await put({ type: "deskcomm", url: "https://crm.example.test", crmUrl: "https://crm.example.test", token: "do-crm" });
+    const crm = await before();
+    for (const value of [
+      { type: "deskcomm", url: "https://outro-crm.example.test", crmUrl: "https://outro-crm.example.test" },
+      { type: "deskcomm", url: "https://crm.example.test" },
+    ]) {
+      expect(refusalOf(await put(value))).toEqual([400, "token_required"]);
+    }
+    expect(await before()).toEqual(crm);
+  });
+
+  it("refuses the CRM fields where they do not belong", async () => {
+    const params = { key: "whatsapp.connector" };
+    const put = (value: unknown) => call(putSetting, { method: "PUT", cookie: owner, params, body: { value } });
+    const channel = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c77";
+    for (const value of [
+      { type: "webhook", url: "https://hooks.example.test/wa", crmUrl: "https://hooks.example.test", token: "t" },
+      { type: "deskcomm", url: "https://crm.example.test", channelSessionId: channel, token: "t" },
+      { type: "deskcomm", url: "https://crm.example.test", crmUrl: "https://crm.example.test", channelLabel: "sem canal", token: "t" },
+      { type: "deskcomm", url: "https://crm.example.test", crmUrl: "https://crm.example.test", channelSessionId: "não-é-uuid", token: "t" },
+      { type: "deskcomm", url: "https://crm.example.test", crmUrl: "ftp://crm.example.test", token: "t" },
+    ]) {
+      expect(refusalOf(await put(value))).toEqual([400, "validation_error"]);
+    }
   });
 
   it("keeps a webhook token only for the item whose name and address are both unchanged", async () => {

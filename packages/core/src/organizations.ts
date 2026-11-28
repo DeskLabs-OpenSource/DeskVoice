@@ -53,6 +53,27 @@ async function recordOrgEventFor(q: OrgQuery, organizationId: string, kind: OrgE
 
 const sameSet = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && new Set(a).size === a.length && a.every((id) => b.includes(id));
 
+/**
+ * O nascimento de uma organização, igual venha da tela (`addOrganization`) ou do instalador
+ * (`create-owner`): a linha da organização, com o idioma `defaults.language` COPIADO (sem padrão,
+ * nulo, e os formulários propõem pt-BR); a política de saída desligada, com o fuso `defaults.timezone`
+ * COPIADO (sem padrão, o da coluna); e a linha de limites, com `defaults.limits` COPIADO (sem padrão,
+ * nenhum limite e a saída travada). Mudar um padrão depois não mexe nela. Devolve o `id`.
+ *
+ * Quem chama grava o resto (auditoria, dono, papel na instalação) na MESMA transação. `q` tem de ser
+ * de `withSystem`.
+ */
+export async function insertNewOrganization(q: OrgQuery, name: string, now: Date): Promise<string> {
+  const created = await q.one<{ id: string }>("insert into organizations (name, created_at, language) values ($1, $2, $3) returning id", [name, now, await defaultLanguage(q)]);
+  if (!created) throw new Error("Insert into organizations returned no row");
+  const organizationId = created.id;
+  const timezone = await defaultTimezone(q);
+  if (timezone === null) await q.exec("insert into outbound_policy (organization_id, enabled) values ($1, false)", [organizationId]);
+  else await q.exec("insert into outbound_policy (organization_id, enabled, timezone) values ($1, false, $2)", [organizationId, timezone]);
+  await copyDefaultLimits(q, organizationId, now);
+  return organizationId;
+}
+
 export interface AddOrganizationInput {
   name: string;
   actorAccountId: string;
@@ -72,13 +93,8 @@ export type AddOrganizationResult =
 
 /**
  * Cria uma organização, numa transação só:
- * - a organização, com a política de saída desligada, como toda organização, e com o fuso
- *   `defaults.timezone` COPIADO para `outbound_policy.timezone` (seção 3.5): sem padrão gravado, o
- *   padrão da coluna, como antes, e com o idioma `defaults.language` COPIADO para
- *   `organizations.language` (sem padrão, nulo, e os formulários propõem pt-BR). Mudar o padrão
- *   depois não mexe nela;
- * - a linha de limites dela, com o padrão `defaults.limits` COPIADO (seção 3.5): sem padrão gravado,
- *   nenhum limite e a saída travada. Mudar o padrão depois não mexe nela;
+ * - a organização, a política de saída desligada e a linha de limites, por `insertNewOrganization`,
+ *   o mesmo caminho de `create-owner` (seção 3.5: os padrões COPIADOS, e sem padrão a saída travada);
  * - `organization_created` na auditoria da instalação e na da organização;
  * - se a lista de quem administra ainda não é explícita (é a segunda organização): a marca para todo
  *   dono ativo da fundadora que não a tem, para os administradores escolhidos em `keep`, e
@@ -100,14 +116,7 @@ export function addOrganization(db: Db, input: AddOrganizationInput, now: Date):
       return { ok: false, reason: "invalid_keep" };
     }
 
-    // O idioma `defaults.language` COPIADO; sem padrão, nulo, que é o que a coluna (sem valor padrão) já daria.
-    const created = await q.one<{ id: string }>("insert into organizations (name, created_at, language) values ($1, $2, $3) returning id", [name, now, await defaultLanguage(q)]);
-    if (!created) throw new Error("Insert into organizations returned no row");
-    const organizationId = created.id;
-    const timezone = await defaultTimezone(q);
-    if (timezone === null) await q.exec("insert into outbound_policy (organization_id, enabled) values ($1, false)", [organizationId]);
-    else await q.exec("insert into outbound_policy (organization_id, enabled, timezone) values ($1, false, $2)", [organizationId, timezone]);
-    await copyDefaultLimits(q, organizationId, now);
+    const organizationId = await insertNewOrganization(q, name, now);
     await recordInstallationEvent(q, now, "organization_created", { actorAccountId: input.actorAccountId, organizationId, payload: { name } });
     await recordOrgEventFor(q, organizationId, "organization_created", { name }, now);
 
