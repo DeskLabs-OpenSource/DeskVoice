@@ -132,6 +132,7 @@ const timeline: TimelineDictionary = {
     approval_applied: { approved: "El agente siguió como aprobado.", denied: "El agente siguió como negado." },
     human_notified: "Avisó a una persona",
     human_notified_channels: "Enviado por: {channels}",
+    withheld: "Llamada simulada: no salió por {channels}, que habría recibido el aviso.",
     dtmf_sent: "Pulsó teclas en el menú",
     agent_handoff: "Pasó a {to}",
     agent_handoff_from: "De {from}",

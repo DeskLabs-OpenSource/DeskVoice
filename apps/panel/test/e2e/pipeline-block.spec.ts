@@ -196,3 +196,38 @@ test("pipeline (6b): o agente no Pipeline mostra a escolha gravada, e voltar ao 
   await expect(page.getByRole("status").filter({ hasText: common.actions.saved })).toHaveText(common.actions.saved);
   expect((await patch).postDataJSON()).toEqual(expect.objectContaining({ engine: "gemini-live", pipeline: null }));
 });
+
+test("pipeline (abas): salvar de outra aba com uma peça faltando abre a aba Agente, rola até o bloco e diz a peça, sem PATCH", async ({ page }) => {
+  // Ressalva da revisora no #605: a peça que falta está no bloco da aba Agente, e o salvar pode vir de
+  // qualquer aba do formulário. O bloco não é um campo que o navegador recuse: quem abre a aba e rola é o `reveal`.
+  await signIn(page);
+  await interceptAssembled(page);
+  const agentId = await createAgent(page, { engine: "gemini-live" });
+  await page.goto(`/agents/${agentId}`);
+  const agentTab = page.getByRole("tab", { name: agents.tabs.agente, exact: true });
+  const advancedTab = page.getByRole("tab", { name: agents.tabs.avancado, exact: true });
+
+  // O Pipeline escolhido, sem voz marcada: a peça que falta é a voz.
+  await engineField(page).selectOption("pipeline");
+  await expect(engineField(page)).toHaveValue("pipeline");
+  // Do alto da aba Agente, o bloco fica abaixo da dobra: sem a rolagem, ele não estaria na tela.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(pipelineBlock(page)).not.toBeInViewport();
+
+  await advancedTab.click();
+  await expect(advancedTab).toHaveAttribute("aria-selected", "true");
+  await expect(pipelineBlock(page)).toBeHidden();
+  await page.evaluate(() => window.scrollTo(0, 0));
+
+  let patches = 0;
+  page.on("request", (request) => {
+    if (request.method() === "PATCH" && /\/api\/v1\/agents\/[^/]+$/.test(request.url())) patches += 1;
+  });
+  await page.getByRole("button", { name: common.actions.save, exact: true }).click();
+
+  await expect(agentTab).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL(/\?aba=agente$/);
+  await expect(pipelineBlock(page)).toBeInViewport();
+  await expect(page.getByText(agents.pipelineMissingPiece.voice, { exact: true })).toBeVisible();
+  expect(patches).toBe(0);
+});

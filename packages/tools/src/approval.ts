@@ -49,12 +49,12 @@ export async function askApproval(ctx: ToolContext, request: ApprovalRequest): P
   // ferramenta vencer o pedido, ele não fica pendente para sempre no painel.
   await enqueueTask(ctx.q, { kind: "expire_approval", payload: { approvalId: approval.id }, callId: ctx.callId, runAt: expiresAt });
 
-  await notifyHumans(ctx, `Aprovação pedida durante uma ligação: ${request.question}\n\n${request.context}`, { whatsapp: true });
+  const { withheld } = await notifyHumans(ctx, `Aprovação pedida durante uma ligação: ${request.question}\n\n${request.context}`, { whatsapp: true });
   await recordEvent(
     ctx.q,
     ctx.callId,
     "approval_requested",
-    { approvalId: approval.id, question: request.question, context: request.context, defaultOnTimeout: request.defaultOnTimeout, expiresAt: expiresAt.toISOString(), ...(request.tool !== undefined && { tool: request.tool }) },
+    { approvalId: approval.id, question: request.question, context: request.context, defaultOnTimeout: request.defaultOnTimeout, expiresAt: expiresAt.toISOString(), ...(request.tool !== undefined && { tool: request.tool }), ...(withheld.length > 0 && { withheld }) },
     ctx.clock.now(),
   );
   ctx.say(request.say);
