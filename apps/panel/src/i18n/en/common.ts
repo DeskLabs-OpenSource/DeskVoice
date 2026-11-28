@@ -117,6 +117,7 @@ const common: CommonDictionary = {
     approval_expired: "The time to answer has run out. The agent went on with the default of the request.",
     purpose_required: "To turn it on, state the purpose and the legal basis of the calls.",
     password_required: "When the provider or the user changes, enter the password again.",
+    deskcomm_crm_not_configured: "Save the DeskcommCRM connector with the CRM address first.",
     token_required: "When the connector address or type changes, enter the token again.",
     endpoint_required: "The classification key belongs to an endpoint: enter the endpoint too.",
     endpoint_key_required: "When the classification endpoint changes, enter its key again.",

@@ -108,7 +108,11 @@ O dono pediu esta leitura antes da sonda (DESA-62, 24/11). Ela foi feita na DESA
    endereço de uma reunião (`/abc-defg-hij`) fica bloqueado** [L].
 3. **Política de Uso Aceitável do Meet:** https://support.google.com/meet/answer/9847091,
    atualizada em 11/09/2025. Não fala de bot nem de gravação. Tem *"Do not impersonate a person or
-   organization or misrepresent yourself"* [L], e o aviso fixo da seção 6 atende a isso.
+   organization or misrepresent yourself"* [L], e o aviso fixo da seção 6 atende a isso. Na parte
+   de spam, tem *"unwanted content that is created by an automated program"* [L]. Leitura nossa
+   [I]: o agente que fala sem ser chamado cairia nela, e esse é o fracasso da fatia 3. Essa frase
+   só foi citada em 27/11/2026, na releitura da fatia 1, quando os três textos estavam iguais aos
+   de 24/11.
 4. **Bots on Demand API:** https://developers.google.com/bots-on-demand: *"Only allowlisted vendors
    may access the Bots on Demand API"*. A API serve para teste de carga, e não é um caminho para nós
    [L].

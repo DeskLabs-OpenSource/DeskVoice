@@ -1,4 +1,4 @@
-import { recordTrunkOverlap, trunkOverlapWarning } from "@deskvoice/core";
+import { recordTrunkOverlap, trunkOverlapWarning, type TrunkCandidate } from "@deskvoice/core";
 import { z } from "zod";
 import { ApiError, type ServerDeps, type Session } from "../../../../server/context";
 import { createRateLimiter } from "../../../../server/rate-limit";
@@ -49,7 +49,8 @@ export const trunkOverlapLimiter = createRateLimiter(TRUNK_OVERLAP_CHECKS_PER_MI
  * por IP (desta ou de outra organização) que hoje está no ar, a gravação para e a tela pergunta.
  * A resposta não diz qual linha, de quem nem em que endereço: só que existe uma. Com a confirmação,
  * salva, mas confere do mesmo jeito: a confirmação é só um campo do pedido, e a rota não confia que
- * ela veio depois do aviso. Quem chama só confere quando o endereço, os extras ou o modo mudam.
+ * ela veio depois do aviso. A criação sempre confere; a edição, quando a linha passa a entrar no
+ * agrupamento ou, já dentro dele, muda o endereço, os extras ou o modo (`trunkEntersGroups`).
  *
  * Cada conferência, com ou sem confirmação, gasta uma tentativa do limite da organização; acima
  * dele, 429 sem conferir e sem salvar. Na auditoria da instalação, fora da transação da linha:
@@ -61,14 +62,14 @@ export async function requireOverlapConfirmed(
   deps: ServerDeps,
   organizationId: string,
   session: Session,
-  candidate: { id?: string; host: string; authMode: "register" | "ip"; matchExtra?: readonly string[] | null },
+  candidate: TrunkCandidate,
   confirmed: boolean | undefined,
 ): Promise<void> {
   const now = deps.clock.now();
   if (!trunkOverlapLimiter.take(organizationId, now)) {
     throw new ApiError(429, "too_many_attempts", "Too many attempts. Wait a minute and try again.");
   }
-  if (!(await trunkOverlapWarning(deps.db, organizationId, candidate)).stops) return;
+  if (!(await trunkOverlapWarning(deps.db, deps.secretKey, organizationId, candidate)).stops) return;
   if (confirmed === true) {
     await recordTrunkOverlap(deps.db, now, "trunk_overlap_confirmed", organizationId, session.userId);
     return;
