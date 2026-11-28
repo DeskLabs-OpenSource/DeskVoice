@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { FOUNDING_ORGANIZATION_KEY, findLoginAccount, isInstallationAdmin, verifyPassword, withSystem } from "@deskvoice/core";
+import { FOUNDING_ORGANIZATION_KEY, findLoginAccount, isInstallationAdmin, organizationLimits, verifyPassword, withOrg, withSystem } from "@deskvoice/core";
 import { afterAll, describe, expect, it } from "vitest";
-import { openTestDbs, tasksOf } from "../../test/helpers";
+import { clearInstallationState, openTestDbs, tasksOf } from "../../test/helpers";
 import { createOwner } from "./create-owner";
 
 const { app, owner } = openTestDbs();
 afterAll(async () => {
+  await clearInstallationState(owner);
   await app.close();
   await owner.close();
 });
@@ -94,5 +95,67 @@ describe("createOwner", () => {
 
   it("recusa e-mail inválido", async () => {
     await expect(createOwner(app, { ...input(), email: "sem-arroba" })).rejects.toThrow(/e-mail inválido/);
+  });
+});
+
+// Convenção 14 e seção 3.5 do desenho do R8: toda organização nasce com a saída travada pela
+// administração, venha da tela (`addOrganization`) ou do instalador. Antes, a do instalador nascia sem
+// linha de limites, e organização sem linha é organização que pode ligar para fora (revisão fria da
+// 0.50.0, item 8).
+describe("createOwner: a organização nasce pelo mesmo caminho da tela", () => {
+  type Born = { maxTrunks: number | null; maxAgents: number | null; monthlySpendCapCents: number | null; outboundAllowed: boolean; policyEnabled: boolean; timezone: string; language: string | null };
+  const born = async (organizationId: string): Promise<Born | null> =>
+    withSystem(app, (q) =>
+      q.one<Born & Record<string, unknown>>(
+        `select l.max_trunks as "maxTrunks", l.max_agents as "maxAgents", l.monthly_spend_cap_cents as "monthlySpendCapCents", l.outbound_allowed as "outboundAllowed",
+                p.enabled as "policyEnabled", p.timezone, o.language
+           from organizations o
+           join organization_limits l on l.organization_id = o.id
+           join outbound_policy p on p.organization_id = o.id
+          where o.id = $1`,
+        [organizationId],
+      ),
+    );
+  const setting = (key: string, value: unknown): Promise<void> =>
+    withSystem(app, async (q) => {
+      await q.exec("insert into installation_settings (key, value) values ($1, $2) on conflict (key) do update set value = excluded.value", [key, JSON.stringify(value)]);
+    });
+
+  it("numa instalação nova, sem padrão gravado, nasce sem limite e com a saída travada", async () => {
+    await clearInstallationState(owner);
+    const created = await createOwner(app, input());
+    if (!created.created) throw new Error("expected the owner to be created");
+
+    expect(await born(created.organizationId)).toEqual({
+      maxTrunks: null,
+      maxAgents: null,
+      monthlySpendCapCents: null,
+      outboundAllowed: false,
+      policyEnabled: false,
+      timezone: "America/Sao_Paulo",
+      language: null,
+    });
+    // A mesma leitura de `checkOutboundAllowed` e da rota da política: a trava vale pela organização.
+    expect((await withOrg(app, created.organizationId, (q) => organizationLimits(q))).outboundAllowed).toBe(false);
+  });
+
+  it("com padrões gravados, copia os limites, o fuso e o idioma, e liberar a saída não a liga", async () => {
+    await clearInstallationState(owner);
+    await setting("defaults.limits", { maxTrunks: 2, maxAgents: 5, monthlySpendCapCents: 12_345, outboundAllowed: true });
+    await setting("defaults.timezone", "America/Manaus");
+    await setting("defaults.language", "es");
+    const created = await createOwner(app, input());
+    if (!created.created) throw new Error("expected the owner to be created");
+
+    expect(await born(created.organizationId)).toEqual({
+      maxTrunks: 2,
+      maxAgents: 5,
+      monthlySpendCapCents: 12_345,
+      outboundAllowed: true,
+      policyEnabled: false,
+      timezone: "America/Manaus",
+      language: "es",
+    });
+    await clearInstallationState(owner);
   });
 });
