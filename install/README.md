@@ -299,11 +299,40 @@ partida, e mudado ele sempre reinicia o Asterisk.
 
 A linha "Log do Asterisk" mede a pasta de log dentro do contêiner do Asterisk. O Asterisk do
 DeskVoice escreve o log só na saída do contêiner, que o Docker limita (10 MB por arquivo, cinco
-arquivos), e que se lê com `docker compose -f deploy/docker-compose.yml logs asterisk`. As
+arquivos), e que se lê com `docker compose -f deploy/docker-compose.yml logs asterisk`. Esse log
+guarda a partida do Asterisk, o caminho de cada ligação, os avisos (WARNING) e os erros (ERROR);
+os NOTICE ficam de fora. Ele guarda cerca de quatro semanas (medido sem ligações, na instalação de prova); cada ligação
+soma, e com muito movimento cabe menos. No `ok`, a linha diz desde quando o log da sua instalação
+guarda. Para guardar mais tempo, copie o log para um arquivo antes que ele saia
+(`docker compose -f deploy/docker-compose.yml logs -t asterisk > asterisk-$(date +%F).log`), ou
+dê ao serviço `asterisk` de `deploy/docker-compose.yml` um `logging` próprio, com `max-size` e
+`max-file` maiores (hoje ele usa o teto comum aos serviços), sabendo que a atualização sobrescreve
+esse arquivo e volta ao teto padrão. As
 versões sem o `deploy/asterisk/logger.conf` também gravavam `/var/log/asterisk/messages.log`, sem
 limite: numa
 instalação, o arquivo passou de 20 GB. A atualização não apaga esse arquivo (é dado seu); passando
 de 1 GB, a linha vira `aviso` e traz o comando que o esvazia.
+
+Uma ligação recusada antes do dialplan não aparece nesse log. A operadora mandou a ligação, o
+Asterisk respondeu com recusa, e ela nem chegou ao agente. São dois casos: "No matching endpoint
+found", quando a ligação chega de um endereço que nenhuma linha reconhece (por exemplo, a operadora
+mudou o IP), e "extension not found", quando a linha é reconhecida mas o número chamado não está
+no dialplan. O Asterisk escreve as duas recusas como NOTICE, e os NOTICE ficam fora desse log
+porque eram quase todo o volume (em grande parte, tentativas de fora contra a porta SIP). Para ver
+o motivo, ligue um registro temporário, repita a ligação e desligue o registro. É preciso ter
+acesso ao servidor:
+
+```bash
+docker compose -f deploy/docker-compose.yml exec asterisk asterisk -rx "logger add channel /tmp/recusas.log notice"
+# repita a ligação que não chegou
+docker compose -f deploy/docker-compose.yml exec asterisk grep -E "No matching endpoint|extension not found" /tmp/recusas.log
+docker compose -f deploy/docker-compose.yml exec asterisk asterisk -rx "logger remove channel /tmp/recusas.log"
+docker compose -f deploy/docker-compose.yml exec asterisk rm -f /tmp/recusas.log
+```
+
+Enquanto o registro está ligado, o arquivo não tem teto e recebe também as tentativas de fora, que
+são muitas. Use-o por poucos minutos e apague o arquivo depois. Se o Asterisk reiniciar antes, o
+registro some sozinho, e o arquivo fica até ser apagado.
 
 A linha "WhatsApp" fala do serviço do WhatsApp por QR Code (o contêiner `waha`), que só existe
 na instalação que o pediu pela tela. "Não instalado" é o estado normal, e é `ok`. Instalado, a

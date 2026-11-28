@@ -373,7 +373,16 @@ if [ "$only_essential" = 0 ]; then
       ""|*[!0-9]*) add asterisk_log "Log do Asterisk" 0 aviso "não deu para medir a pasta /var/log/asterisk do contêiner" ;;
       *) if [ "$log_mb" -ge "$ASTERISK_LOG_WARN_MB" ]; then
            add asterisk_log "Log do Asterisk" 0 aviso "a pasta de log do Asterisk ocupa ${log_mb} MB. É o messages.log das versões sem limite de log; o Asterisk desta versão não o grava mais, e o que ele diz fica em: docker compose -f deploy/docker-compose.yml logs asterisk. Para liberar o espaço (apaga esse histórico): docker compose -f deploy/docker-compose.yml exec asterisk truncate -s 0 /var/log/asterisk/messages.log"
-         else add asterisk_log "Log do Asterisk" 0 ok "${log_mb} MB em /var/log/asterisk; o log corrente vai para a saída do contêiner, com teto"; fi ;;
+         else
+           # Desde quando a saída do contêiner guarda: o carimbo da primeira linha que o Docker
+           # ainda tem. A leitura para na primeira linha. Sem carimbo legível, o ok fica sem ele.
+           log_cid="$(dc ps -q asterisk 2>/dev/null | head -n 1 || true)"
+           log_since=""
+           if [ -n "$log_cid" ]; then
+             log_since="$(docker logs -t "$log_cid" 2>&1 | head -n 1 | sed -n 's/^\([0-9]\{4\}-[0-9][0-9]-[0-9][0-9]\)T\([0-9][0-9]:[0-9][0-9]\)[0-9:.]*Z .*/\1 \2 UTC/p' || true)"
+           fi
+           add asterisk_log "Log do Asterisk" 0 ok "${log_mb} MB em /var/log/asterisk; o log corrente vai para a saída do contêiner, com teto${log_since:+, e guarda desde $log_since}"
+         fi ;;
     esac
   fi
 fi

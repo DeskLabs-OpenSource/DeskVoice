@@ -48,6 +48,8 @@ case "$args" in
   " inspect -f {{.State.StartedAt}} "*) if [ -f "$FAKE_DIR/asterisk_started" ]; then cat "$FAKE_DIR/asterisk_started"; else echo 2026-11-21T12:00:00.123456789Z; fi; exit 0 ;;
   # O log do contêiner desde a partida: $FAKE_DIR/asterisk_logs (vazio, sem o arquivo).
   " logs --since "*) answer asterisk_logs; exit 0 ;;
+  # O log do contêiner com o carimbo do Docker em cada linha: $FAKE_DIR/asterisk_logs_t (vazio, sem o arquivo).
+  " logs -t "*) answer asterisk_logs_t; exit 0 ;;
   # A sonda da entrada única (painel, voz e a rota do agente, pelo Caddy). Vem antes da conversa do
   # agente porque também cita a rota dele.
   *" exec -T panel node "*"voice-ws"*) if [ -f "$FAKE_DIR/entry_probe" ]; then cat "$FAKE_DIR/entry_probe"; else printf 'panel|200\nvoice|426\nagent|404|0\n'; fi; exit 0 ;;

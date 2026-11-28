@@ -80,7 +80,10 @@ check "o modules.conf mantém o autoload da imagem" grep -qx 'autoload=yes' "$G/
 # nunca para um arquivo dentro do contêiner, que crescia sem limite (20 GB numa instalação).
 check "o logger.conf montado é o do repositório" cmp -s "$REPO/deploy/asterisk/logger.conf" "$G/logger.conf"
 contains "o compose monta o logger.conf gerado" "$(grep -E '^\s+- \./asterisk/' "$D/docker-compose.yml")" "./asterisk/generated/logger.conf:/etc/asterisk/logger.conf:ro"
-equal "o logger.conf só escreve no console" "console => notice,warning,error" "$(grep -Ev '^[[:space:]]*(;|\[|$)' "$G/logger.conf")"
+# O console guarda WARNING e ERROR, e não o NOTICE: as linhas NOTICE eram quase todo o volume e, com o
+# teto do Compose, encurtavam o histórico para cerca de um dia. Sem o WARNING, ou com o NOTICE de
+# volta, reprova.
+equal "o logger.conf só escreve no console, com WARNING e ERROR" "console => warning,error" "$(grep -Ev '^[[:space:]]*(;|\[|$)' "$G/logger.conf")"
 equal "o logger.conf mudado é recarregado pelo módulo logger, sem reiniciar" logger "$(asterisk_module_of logger.conf)"
 lacks "o compose não monta mais arquivo direto do repositório" "$(grep -E '^\s+- \./asterisk/' "$D/docker-compose.yml")" "./asterisk/extensions.conf"
 # Sem o modelo do modules.conf, só a volta da atualização segue (a versão anterior pode ser de antes

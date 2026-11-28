@@ -64,6 +64,17 @@ A tela gera a configuração do Asterisk: não há arquivo para editar. Tronco n
 senha, modo, e, no modo por IP, se a operadora liberou o IP público da VPS. Ligação muda é rede:
 skill `deskvoice-instalar`.
 
+Ligação recebida que não chega ao agente, com o tronco registrado: o Asterisk pode estar recusando
+antes do dialplan ("No matching endpoint found", ligação de um endereço que nenhuma linha
+reconhece, como a operadora que mudou de IP; ou "extension not found", número que não está no
+dialplan). Essas recusas são NOTICE e não ficam em `docker compose -f deploy/docker-compose.yml logs
+asterisk`. Com acesso ao servidor, ligue um registro temporário, repita a ligação, leia e desligue:
+`asterisk -rx "logger add channel /tmp/recusas.log notice"`, depois `grep` no arquivo, depois
+`asterisk -rx "logger remove channel /tmp/recusas.log"` e apague o arquivo (os comandos inteiros,
+com o `docker compose exec`, estão em `install/README.md`, na linha "Log do Asterisk"). O arquivo
+não tem teto enquanto o registro está ligado: poucos minutos, e apague depois. O registro some se
+o Asterisk reiniciar.
+
 ## 3. Ligações de saída (tela Ligações de saída)
 
 Vêm **desligadas**, de propósito. Para ligar, o dono da instalação declara a **finalidade** e a
