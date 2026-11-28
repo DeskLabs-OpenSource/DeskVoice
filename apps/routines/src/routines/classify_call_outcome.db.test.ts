@@ -1389,4 +1389,65 @@ describe("classify_call_outcome: o cérebro escolhido para ler a ligação", () 
       expect(await falhasDe(callId)).toEqual([{ reason: "rejected", brain: CEREBRO.id, model: COM_PRECO.id, status: 401, costCents: 0, costMeasured: true, choiceFrom: "agent" }]);
     });
   });
+
+  describe("o teto de gasto do mês da organização (revisão fria da 0.50.0, 3.3)", () => {
+    /** O teto como a administração da instalação grava, em centavos. */
+    const teto = (org: string, centavos: number): Promise<number> =>
+      withSystem(app, (q) => q.exec("insert into organization_limits (organization_id, monthly_spend_cap_cents) values ($1, $2) on conflict (organization_id) do update set monthly_spend_cap_cents = excluded.monthly_spend_cap_cents", [org, centavos]));
+    /** O gasto do mês de outra ligação da mesma organização, no extrato que o teto soma. */
+    const gastou = async (org: string, microcentavos: number): Promise<number> => {
+      const outra = await createCall(app, org, t0);
+      return withSystem(app, (q) =>
+        q.exec("insert into usage_ledger (organization_id, call_id, engine, cost_cents, cost_microcents, at) values ($1, $2, $3, 0, $4, $5)", [org, outra, MOTOR, microcentavos, t0]),
+      );
+    };
+    const recusa = { reason: "spend_cap_reached", engine: MOTOR, capCents: 0 };
+
+    it("teto zero: o motor não recebe pedido, os dois eventos dizem por quê e nada entra no extrato", async () => {
+      const { org, callId } = await pronta("teto do mes zero");
+      await teto(org, 0);
+      const fetch = openai(completa());
+
+      await roda(org, callId, fetch);
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(await falhasDe(callId)).toEqual([recusa]);
+      expect(await eventosDe(callId, "analysis_not_done")).toEqual([recusa]);
+      expect(await extratoDe(callId)).toEqual([]);
+    });
+
+    it("o cérebro escolhido também não é chamado no teto do mês", async () => {
+      const { org, callId } = await pronta("teto do mes cerebro");
+      await comCerebro(org, CEREBRO.id, [COM_PRECO]);
+      await escolhe(org, CEREBRO.id, COM_PRECO.id);
+      await teto(org, 0);
+      const calls = CEREBRO.completeJson.mock.calls.length;
+      const fetch = openai(completa());
+
+      await roda(org, callId, fetch);
+
+      expect(CEREBRO.completeJson.mock.calls.length).toBe(calls);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(await falhasDe(callId)).toEqual([recusa]);
+    });
+
+    it("o gasto do mês de outras ligações conta: chegou ao teto, recusa; abaixo dele, lê", async () => {
+      const cheio = await pronta("teto do mes cheio");
+      await teto(cheio.org, 1);
+      await gastou(cheio.org, MICRO);
+      const fetchCheio = openai(completa());
+      await roda(cheio.org, cheio.callId, fetchCheio);
+      expect(fetchCheio).not.toHaveBeenCalled();
+      expect(await falhasDe(cheio.callId)).toEqual([{ ...recusa, capCents: 1 }]);
+
+      const folga = await pronta("teto do mes com folga");
+      await teto(folga.org, 2);
+      await gastou(folga.org, MICRO);
+      const fetchFolga = openai(completa());
+      await roda(folga.org, folga.callId, fetchFolga);
+      expect(fetchFolga).toHaveBeenCalledTimes(1);
+      expect(await falhasDe(folga.callId)).toEqual([]);
+      expect(await eventosDe(folga.callId, "call_analyzed")).toHaveLength(1);
+    });
+  });
 });

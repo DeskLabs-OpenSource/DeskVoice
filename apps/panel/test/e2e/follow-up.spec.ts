@@ -17,6 +17,8 @@ test("a pendência da ligação chega em Minhas, é fechada com uma nota e o fec
 
   // O dono das pendências se escolhe na tela do agente; o modelo nunca escolhe a pessoa.
   await page.goto(`/agents/${agentId}`);
+  // O dono das pendências fica na aba Depois da ligação (desenho 2026-11-26, fatia 1).
+  await page.getByRole("tab", { name: agents.tabs.depois }).click();
   await page.getByLabel(agents.followUpOwner).selectOption({ label: me.data.name });
   await page.getByRole("button", { name: common.actions.save, exact: true }).click();
   await expect(page.getByRole("status")).toHaveText(common.actions.saved);

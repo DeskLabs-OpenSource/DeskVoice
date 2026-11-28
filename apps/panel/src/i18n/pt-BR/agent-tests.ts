@@ -1,10 +1,7 @@
 // A tela dos testes do agente (fatia 7c, seção 5.6 de docs/specs/2026-11-21-testes-do-agente.md).
 const agentTests = {
-  back: "Voltar ao agente",
-  /** O link na página do agente. */
-  link: "Testes do agente",
-  linkLead: "Escreva conversas e confira o que o agente decide, antes de pôr no ar.",
-  title: "Testes de {agent}",
+  /** O título da aba Testes, na tela do agente. */
+  tabTitle: "Testes do agente",
   lead: "Cada teste é uma conversa escrita: o que quem liga diz e o que o agente precisa fazer. O teste roda só quando você clica.",
   /** A frase de custo: aparece antes do primeiro clique (seção 5.6). */
   costNotice: "Cada rodada usa o motor deste agente com a sua chave e entra no custo do mês. Nenhuma ferramenta roda de verdade.",

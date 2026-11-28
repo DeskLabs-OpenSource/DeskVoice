@@ -1,4 +1,4 @@
-import { MAX_TASK_ATTEMPTS, withOrg, type NotificationAudience, type OrgQuery } from "@deskvoice/core";
+import { MAX_TASK_ATTEMPTS, toE164, withOrg, type NotificationAudience, type OrgQuery } from "@deskvoice/core";
 import { loadAllowedWebhooks, loadWhatsAppConnector, postToWebhook, sendWhatsApp } from "@deskvoice/tools";
 import { z } from "zod";
 import type { Routine, RoutineDeps } from "../types";
@@ -18,6 +18,12 @@ interface NotificationRow {
 
 /** Fica em `notifications.error` de um aviso ENVIADO: a ressalva de como ele saiu. */
 const UNVERIFIED_ADDRESS = "sent without the WhatsApp service confirming the address of the number (check-exists unavailable)";
+
+/**
+ * Fica em `notifications.error` da mensagem para quem ligou que não saiu porque o número entrou na
+ * lista de não ligar entre a revisão e o envio. Sem o número: o erro vai também para a fila e o log.
+ */
+export const ON_DO_NOT_CALL = "not sent: the number is on the do-not-call list";
 
 /** O que entra no lugar do número de quem ligou no texto de erro da mensagem para ele. */
 export const CALLER_NUMBER_MARK = "[number]";
@@ -88,6 +94,22 @@ const routine: Routine = {
       });
     // Nova tentativa de uma tarefa cujo envio já tinha saído: não manda duas vezes.
     if (notification.status === "sent") return;
+
+    // A lista de não ligar é conferida de novo na hora do envio (revisão fria da 0.50.0): a revisão
+    // confere ao enfileirar, mas o número pode entrar na lista antes da entrega, ou entre uma tentativa
+    // e outra. Número na lista não recebe: a mensagem fica `failed`, sem nova tentativa e sem pendência
+    // (a pessoa pediu para não ser procurada), e a ligação original ganha o resultado com a frase.
+    if (notification.audience === "caller" && notification.target !== null) {
+      const target = notification.target;
+      const blocked = await withOrg(deps.db, task.organizationId, async (q) => {
+        const e164 = toE164(target) ?? target;
+        if (!(await q.one("select 1 from do_not_call where organization_id = $1 and e164 = $2", [q.organizationId, e164]))) return false;
+        await q.exec("update notifications set status = 'failed', error = $2 where id = $1", [notificationId, ON_DO_NOT_CALL]);
+        if (callerCall !== null) await recordCallerMessageResult(q, callerCall, "whatsapp_do_not_call", deps.clock.now());
+        return true;
+      });
+      if (blocked) return;
+    }
 
     let note: string | null;
     try {

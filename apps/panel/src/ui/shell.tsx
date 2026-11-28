@@ -358,7 +358,11 @@ export function Shell({ me, theme, children }: { me: Me; theme: Theme; children:
   return (
     <MeContext.Provider value={me}>
     <div className="min-h-dvh lg:grid lg:grid-cols-[248px_minmax(0,1fr)]">
-      <aside className="hidden border-r border-line bg-surface lg:block">
+      {/* `overflow-anchor: none`: a lateral tem a altura da página inteira e nunca se move, e o Chrome a
+          escolhia como âncora da rolagem. Aí, quando a faixa de aprovação acima do `main` aparecia ou
+          sumia, a página pulava 100 px e o bloco que a pessoa lia (ou o do endereço com `#`) saía da
+          tela. Sem a lateral na disputa, a âncora é o conteúdo, e o navegador compensa o pulo. */}
+      <aside className="hidden border-r border-line bg-surface [overflow-anchor:none] lg:block">
         {/* z-10: o conteúdo da tela (main.rise) guarda um transform da animação de entrada e, sem
             isso, seria pintado por cima do popover do sino onde ele passa da lateral. */}
         <div className="sticky top-0 z-10 flex h-dvh flex-col gap-6 px-3 py-5">

@@ -237,6 +237,7 @@ const timeline = {
       provider_error: "O provedor respondeu com erro do lado dele.",
       unexpected_response: "O provedor respondeu algo fora do formato pedido. O que ele cobrou entrou no custo da chamada.",
       transcription_too_long: "A gravação é mais longa do que o provedor aceita num pedido. Nada foi enviado nem cobrado.",
+      spend_cap_reached: "A organização tinha chegado ao teto de gasto do mês. Nada foi enviado nem cobrado. Quem administra a instalação pode mudar o teto.",
     } as Record<string, string>,
     transcription_failed_unknown: "O provedor não transcreveu a gravação. O motivo está abaixo e no registro do processo do painel.",
     erased: "O texto deste registro foi apagado a pedido de quem ligou.",
@@ -269,6 +270,7 @@ const timeline = {
       brain_unavailable: "O cérebro escolhido para ler a ligação não está disponível, ou o modelo saiu da lista guardada dele. Nada foi enviado, nem ao motor de voz. Confira a escolha na seção da análise, em Configurações.",
       brain_no_key: "O cérebro escolhido para ler a ligação não tem chave cadastrada. Nada foi enviado, nem ao motor de voz. Salve a chave em Configurações → Cérebros.",
       brain_unmeasured_without_ceiling: "O preço do modelo escolhido ({model}) não é conhecido, e o agente não tem teto de custo. Sem teto, um custo que não é medido não teria limite, e nada foi enviado. Ligue o teto de custo no agente ou escolha um modelo com preço.",
+      spend_cap_reached: "A organização tinha chegado ao teto de gasto do mês, e nada foi enviado ao provedor. Quem administra a instalação pode mudar o teto.",
     } as Record<string, string>,
     outcome_not_classified_status: "Resposta do provedor: HTTP {status}",
     call_analyzed: "Ligação analisada: nota {score} de 10",
@@ -294,6 +296,7 @@ const timeline = {
       brain_unavailable: "o cérebro escolhido não está disponível, ou o modelo saiu da lista guardada dele",
       brain_no_key: "o cérebro escolhido não tem chave cadastrada",
       brain_unmeasured_without_ceiling: "o preço do modelo escolhido ({model}) não é conhecido, e o agente não tem teto de custo",
+      spend_cap_reached: "a organização tinha chegado ao teto de gasto do mês, e nada foi enviado ao provedor",
     } as Record<string, string>,
     analyst_read: {
       read: "O analista leu a conversa.",
@@ -373,6 +376,7 @@ const timeline = {
     drop_follow_up_result: {
       whatsapp_sent: "A mensagem no WhatsApp para quem ligou saiu.",
       whatsapp_failed: "A mensagem no WhatsApp para quem ligou não saiu.",
+      whatsapp_do_not_call: "A mensagem no WhatsApp para quem ligou não saiu: o número entrou na lista de não ligar antes do envio.",
       call_back_placed: "A religação saiu (tentativa {attempt}).",
       call_back_refused: "A religação não saiu (tentativa {attempt}): {reason}.",
       call_back_expired: "A religação não saiu (tentativa {attempt}): o processo de voz não discou a tempo.",

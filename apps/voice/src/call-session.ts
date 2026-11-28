@@ -75,6 +75,7 @@ import {
   type EnginePricing,
   type KeyCheckResult,
   type PieceUsageLine,
+  type SideUsageLine,
   type PipelineEngine,
   type PipelineChoice,
   type PipelineOpening,
@@ -275,6 +276,11 @@ interface Leg {
   piece?: LegPiece;
   /** O consumo e o custo da peça neste trecho, com o preço dela. A peça que passa adiante leva só o consumo de depois. */
   transcriber: { usage: LegUsage; costCents: number };
+  /**
+   * O consumo e o custo do modelo que o motor pede à parte, na mesma sessão, com o preço dele (a
+   * transcrição de quem ligou no OpenAI Realtime, item 3.4 da revisão fria da 0.50.0).
+   */
+  side: { usage: LegUsage; costCents: number };
   /** O último `error` do motor, para explicar um `closed` que venha em seguida. */
   lastError?: Error;
   /** O analista do agente do trecho (fatia 3 da R6), aberto antes do motor. Ausente, nada muda. */
@@ -736,19 +742,23 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   }
 
   /**
-   * Mede um incremento de consumo no trecho. Quem consome é o motor do trecho ou a peça de
-   * transcrição dele, cada um com o preço dele: o custo do trecho é motor + peça, e o da ligação, a
-   * soma dos trechos, que respeita o teto.
+   * Mede um incremento de consumo no trecho. Quem consome é o motor do trecho, a peça de transcrição
+   * dele ou o modelo que o motor pede à parte (`side`), cada um com o preço dele: o custo do trecho é
+   * motor + peça + modelo à parte, e o da ligação, a soma dos trechos, que respeita o teto.
    */
-  async function meter(from: Leg, increment: Usage, piece?: { id: string; pricing: EnginePricing }): Promise<void> {
+  async function meter(from: Leg, increment: Usage, piece?: { id: string; pricing: EnginePricing }, side?: SideUsageLine): Promise<void> {
     if (piece) {
       accumulate(from.transcriber.usage, increment);
       from.transcriber.costCents = estimateCostCents(piece.pricing, from.transcriber.usage);
+    } else if (side) {
+      // Os segundos dele são do áudio que ele ouviu, e não somam à duração da ligação.
+      accumulate(from.side.usage, increment);
+      from.side.costCents = estimateCostCents(side.pricing, from.side.usage);
     } else {
       usage.seconds += increment.seconds ?? 0;
       accumulate(from.usage, increment);
     }
-    from.costCents = estimateCostCents(from.engine.pricing, from.usage) + from.transcriber.costCents;
+    from.costCents = estimateCostCents(from.engine.pricing, from.usage) + from.transcriber.costCents + from.side.costCents;
     // Cada trecho é calculado com o preço do motor dele, e o custo da ligação é a soma dos trechos:
     // com dois agentes em motores de preço diferente, um preço só erraria a conta.
     // `usage` é incremento: o custo sai do total somado, e cada linha do extrato leva a diferença.
@@ -758,12 +768,14 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     costCents = total;
     const reached = reachCeiling(callCents());
     await q.exec(
-      "insert into usage_ledger (organization_id, call_id, engine, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+      "insert into usage_ledger (organization_id, call_id, engine, model, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, cost_estimated, at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
       [
         organizationId,
         callId,
-        // A peça tem linha própria no extrato, e não se confunde com um motor de mesmo id.
+        // A peça tem linha própria no extrato, e não se confunde com um motor de mesmo id. O modelo à
+        // parte fica no motor do trecho, que é quem o pede, com o modelo dele na coluna `model`.
         piece ? `transcriber:${piece.id}` : from.engine.id,
+        side?.model ?? null,
         // O agente do trecho, e não o que atendeu: o custo por agente continua verdadeiro com passagem.
         from.agent.id,
         Math.round(increment.seconds ?? 0),
@@ -774,6 +786,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         // centavo inteiro, para o extrato somar na mesma unidade do resto (a classificação, que é
         // menor que um centavo).
         delta * MICROCENTS_PER_CENT,
+        // O provedor não informou o consumo: o motor o contou, e o custo entra no total e no teto.
+        side?.estimated ?? false,
         clock.now(),
       ],
     );
@@ -1543,6 +1557,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         latency.guardActed(guardTurn);
         session.say(text);
       },
+      answering: () => session.answering?.() === true,
       acted: (report) => {
         // O pedido zera o fato no mesmo instante do `caller_unanswered`: vale só a fala depois do último.
         if (report.action === "asked_to_repeat") callerSpokeAfterAsk = false;
@@ -1571,6 +1586,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       usage: emptyUsage(),
       costCents: 0,
       transcriber: { usage: emptyUsage(), costCents: 0 },
+      side: { usage: emptyUsage(), costCents: 0 },
       ...(analyst && { analyst }),
       guided: new Set(),
       toolsInFlight: new Map(),
@@ -1660,6 +1676,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     });
     // A última medição de uma sessão substituída também conta, e no trecho dela.
     session.on("usage", (increment) => void meter(self, increment).catch(logFailure("could not record usage")));
+    // O modelo que o motor pede à parte (a transcrição do OpenAI Realtime): linha própria, no trecho dela.
+    session.on("sideUsage", (line) => void meter(self, line.usage, undefined, line).catch(logFailure("could not record side usage")));
     // O motor trocou a conexão com o provedor sem fechar a sessão: só fica registrado.
     session.on("resumed", () => {
       if (!current()) return;

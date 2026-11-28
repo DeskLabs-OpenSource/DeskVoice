@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { encryptSecret, type OrgQuery } from "@deskvoice/core";
 import { describe, expect, it } from "vitest";
 import { fakeFetch, fakeLookup, type RecordedRequest } from "../../test/helpers";
-import { loadWhatsAppConnector, sendWhatsApp, type WhatsAppConnector, type WhatsAppMessage } from "./whatsapp";
+import { fakeMcp } from "../../test/mcp-server";
+import { checkDeskcomm, DESKCOMM_CHECK_MAX_CHANNELS, loadWhatsAppConnector, sendWhatsApp, type WhatsAppConnector, type WhatsAppMessage } from "./whatsapp";
 
 const TOKEN = "token-do-conector";
 const DESKCOMM: WhatsAppConnector = { type: "deskcomm", url: "https://crm.example.test/api/v1/messages", token: TOKEN };
@@ -148,5 +149,67 @@ describe("conector deskcomm com o endereço do CRM (contrato do CRM, #330 fatia 
     ])("%s: configuração malformada é erro", async (_label, extra) => {
       await expect(loadWhatsAppConnector(comConfiguracao({ ...gravado, ...extra }), chave)).rejects.toThrow("malformed");
     });
+  });
+});
+
+describe("conferência das duas portas do CRM (#330 fatia 2b)", () => {
+  const CRM = "https://crm.exemplo.com";
+  const TOKEN_CRM = "dsk_token-de-teste";
+  const CANAL = { id: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c77", provider: "waha", display_name: "Número da loja", phone_number: "+19146200000", status: "connected" };
+
+  /** O CRM falso: `/api/mcp` é o servidor MCP falso, e o resto é a REST, respondida por `rest`. */
+  function crmFalso(options: { rest?: () => Response; mcp?: Parameters<typeof fakeMcp>[0] } = {}) {
+    const mcp = fakeMcp(options.mcp);
+    const rest = fakeFetch(options.rest ?? (() => Response.json({ data: [CANAL] })));
+    const fetch: typeof globalThis.fetch = (input, init) => (String(input).endsWith("/api/mcp") ? mcp.fetch(input, init) : rest.fetch(input, init));
+    return { mcp, rest, net: { fetch, lookup: fakeLookup() } };
+  }
+
+  it("as duas portas respondem: lê os tipos pelo MCP e lista os canais pela REST, com o mesmo token", async () => {
+    const crm = crmFalso();
+    const check = await checkDeskcomm({ crmUrl: CRM, token: TOKEN_CRM }, crm.net);
+
+    expect(check).toEqual({ mcp: "ok", rest: "ok", channels: [{ id: CANAL.id, provider: "waha", name: "Número da loja", phone: "+19146200000" }] });
+    const call = crm.mcp.requests.find((request) => request.rpc.method === "tools/call");
+    expect(call?.url).toBe(`${CRM}/api/mcp`);
+    expect(call?.rpc.params).toEqual({ name: "crm_list_event_types", arguments: {} });
+    expect(call?.headers.authorization).toBe(`Bearer ${TOKEN_CRM}`);
+    expect(crm.rest.requests).toHaveLength(1);
+    expect(crm.rest.requests[0]).toMatchObject({ url: `${CRM}/api/v1/channel-sessions`, method: "GET" });
+    expect(crm.rest.requests[0]?.headers.authorization).toBe(`Bearer ${TOKEN_CRM}`);
+  });
+
+  it("token só-MCP: o MCP aceita e a REST recusa, e nenhum canal volta", async () => {
+    const crm = crmFalso({ rest: () => Response.json({ error: { code: "forbidden" } }, { status: 403 }) });
+    expect(await checkDeskcomm({ crmUrl: CRM, token: TOKEN_CRM }, crm.net)).toEqual({ mcp: "ok", rest: "refused", channels: [] });
+  });
+
+  it("o MCP recusa o token por HTTP: refused, e a REST segue com o próprio resultado", async () => {
+    const crm = crmFalso({ mcp: { override: () => new Response("", { status: 401 }) } });
+    expect(await checkDeskcomm({ crmUrl: CRM, token: TOKEN_CRM }, crm.net)).toMatchObject({ mcp: "refused", rest: "ok" });
+  });
+
+  it("isError do MCP, HTTP de erro que não é recusa e corpo fora da forma são unexpected", async () => {
+    const isError = crmFalso({ mcp: { call: () => ({ isError: true, content: [{ type: "text", text: "falhou" }] }) } });
+    expect((await checkDeskcomm({ crmUrl: CRM, token: TOKEN_CRM }, isError.net)).mcp).toBe("unexpected");
+
+    for (const rest of [() => new Response("", { status: 500 }), () => new Response("<html>", { status: 200 }), () => Response.json({ data: [{ id: "não-é-uuid", provider: "waha" }] })]) {
+      expect(await checkDeskcomm({ crmUrl: CRM, token: TOKEN_CRM }, crmFalso({ rest }).net)).toMatchObject({ rest: "unexpected", channels: [] });
+    }
+  });
+
+  it("CRM em endereço não público: as duas portas unreachable, sem pedido nenhum", async () => {
+    const crm = crmFalso();
+    const check = await checkDeskcomm({ crmUrl: CRM, token: TOKEN_CRM }, { fetch: crm.net.fetch, lookup: fakeLookup({ "crm.exemplo.com": ["10.0.0.5"] }) });
+    expect(check).toEqual({ mcp: "unreachable", rest: "unreachable", channels: [] });
+    expect(crm.mcp.requests).toHaveLength(0);
+    expect(crm.rest.requests).toHaveLength(0);
+  });
+
+  it("a lista volta com no máximo o teto de canais, e o canal sem nome nem número chega com null", async () => {
+    const muitos = Array.from({ length: DESKCOMM_CHECK_MAX_CHANNELS + 5 }, (_, index) => ({ id: `a1b2c3d4-e5f6-4a7b-8c9d-${String(index).padStart(12, "0")}`, provider: "waha" }));
+    const check = await checkDeskcomm({ crmUrl: CRM, token: TOKEN_CRM }, crmFalso({ rest: () => Response.json({ data: muitos }) }).net);
+    expect(check.channels).toHaveLength(DESKCOMM_CHECK_MAX_CHANNELS);
+    expect(check.channels[0]).toEqual({ id: muitos[0]?.id, provider: "waha", name: null, phone: null });
   });
 });
