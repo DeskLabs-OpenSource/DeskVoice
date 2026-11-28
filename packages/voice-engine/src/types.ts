@@ -113,6 +113,13 @@ export interface VoiceSessionEvents {
    */
   pieceUsage(line: PieceUsageLine): void;
   /**
+   * O consumo de um modelo que o motor pede ao provedor à parte, dentro da mesma sessão, e que o
+   * provedor cobra pelo preço desse modelo, e não pelo do motor (o OpenAI Realtime e a transcrição
+   * de quem ligou, item 3.4 da revisão fria da 0.50.0). Incremento, como `usage`. Opcional: motor que
+   * não pede modelo à parte não emite.
+   */
+  sideUsage(line: SideUsageLine): void;
+  /**
    * Só o pipeline (R5, fatia 3c-1): o tempo de um turno respondido, um evento por turno, no primeiro
    * áudio da resposta entregue. Turno que não chega a tocar áudio não emite. Opcional: motor que não
    * emite não muda nada.
@@ -174,6 +181,18 @@ export interface PieceUsageLine {
   /** Só na voz: caracteres enviados ao provedor. */
   characters?: number;
   costMicrocents?: number;
+  estimated: boolean;
+}
+
+/**
+ * Uma linha de consumo de um modelo à parte do motor (`VoiceSessionEvents.sideUsage`), com o preço
+ * desse modelo. `estimated` diz que o provedor não informou o consumo, e o motor o contou do áudio
+ * que mandou: a conta pende para mais, nunca para menos.
+ */
+export interface SideUsageLine {
+  model: string;
+  pricing: EnginePricing;
+  usage: Usage;
   estimated: boolean;
 }
 

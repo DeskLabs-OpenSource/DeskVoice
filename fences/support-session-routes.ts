@@ -68,6 +68,7 @@ export const SUPPORT_SESSION_ROUTES: SupportSessionRoute[] = [
   allow("whatsapp/disconnect", "POST", "desliga o canal, não cria acesso"),
   forbid("whatsapp/service", "POST", "dúvida: liga o serviço de WhatsApp da instalação inteira, não só da organização"),
   allow("whatsapp/test", "POST", "manda uma mensagem de teste pelo canal que já existe"),
+  allow("whatsapp/crm-check", "POST", "só lê o CRM do conector já gravado, com o token que já existe: não cria credencial nem acesso, e nada é gravado"),
   forbid("whatsapp-calls/connect", "POST", "pareia um número por QR Code: canal que sobrevive à sessão"),
   allow("whatsapp-calls/disconnect", "POST", "desliga o canal, não cria acesso"),
   forbid("whatsapp-calls/service", "POST", "dúvida: liga o serviço de ligação pelo WhatsApp da instalação inteira"),
