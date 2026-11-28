@@ -411,6 +411,8 @@ export interface McpTool {
   supported: boolean;
   allowed: boolean;
   writes: boolean;
+  /** Pede a aprovação de um humano antes de cada chamada na ligação. Desligada de fábrica. */
+  needsApproval: boolean;
   /** Só dica do servidor; nunca decide `writes`. */
   readOnlyHint?: boolean;
 }
@@ -431,7 +433,7 @@ export interface McpServer {
 
 /** O que a descoberta e a busca de novo devolvem. */
 export interface McpLookup {
-  tools: Array<Omit<McpTool, "allowed" | "writes"> & { allowed?: boolean; writes?: boolean }>;
+  tools: Array<Omit<McpTool, "allowed" | "writes" | "needsApproval"> & { allowed?: boolean; writes?: boolean; needsApproval?: boolean }>;
   omitted: number;
   incomplete: boolean;
   /** Só na busca de novo: o que mudou por ferramenta. */
