@@ -1,7 +1,8 @@
 # Ferramentas de fora pela tela: servidor MCP cadastrado pelo operador (item 8 da pesquisa Vapi)
 
-- **Estado:** aprovado pelo dono em 23/11 (1A, 2A e 3A, seção 9). As fatias 8a, 8b e 8c entraram; a 8d (o guia) está em revisão.
-  O merge de cada fatia continua esperando a palavra do próprio dono.
+- **Estado:** aprovado pelo dono em 23/11 (1A, 2A e 3A, seção 9). As fatias 8a, 8b, 8c e 8d entraram.
+  Desde a decisão do dono de 24/11 (seção 9), as fatias entram com o de acordo da revisora, desde
+  que sigam o desenho.
 - **Data:** 2026-11-22
 - **Quem pediu:** o dono aprovou em 21/11 a terceira leva da pesquisa Vapi (itens 7, 8 e 10), com
   "desenho maior antes". A fonte é o estudo de lacunas do board, de 20/11.
@@ -368,15 +369,21 @@ Duas condições a mais, que entram nas fatias:
 - **A 8a chama ao menos um servidor MCP real conhecido** e anota no PR se o cliente mínimo funciona
   com ele. Os dois servidores reais, com uma ligação com cada, ficam com a fatia que liga as MCP
   à ligação (DESA-524), como diz a seção 7.
-- **O merge de cada fatia espera a palavra do próprio dono**, pedida pelo maestro, por ser
-  capacidade nova.
+- **O merge de cada fatia entra com o de acordo da revisora, desde que siga o desenho.** Até 24/11
+  ela esperava a palavra do próprio dono, pedida pelo maestro, por ser capacidade nova. O dono
+  trocou isso em 24/11 (abaixo). Fatia que sai do desenho volta ao dono.
 
 **O que isso liberou (22/11, do orquestrador):** nada ainda. O desenho foi à pasta do dono como
 decisão antes, por envolver segurança. O prazo de 5 dias úteis não valia aqui.
 
 **A palavra do dono (23/11):** 1A, 2A e 3A, as três recomendações. Isso libera a construção das
-fatias na ordem da seção 6, começando pela 8a. As duas condições acima continuam valendo: a 8a chama
-um servidor MCP real, e o merge de cada fatia espera a palavra do próprio dono.
+fatias na ordem da seção 6, começando pela 8a. A 8a chama um servidor MCP real, como diz a primeira
+condição acima.
+
+**A palavra do dono (24/11, às 09h21):** "pode seguir com sua recomendação nos docs que me
+esperam", que respondeu o documento de 23/11 da pasta dele. Para os itens 7 e 8 ficou valendo a
+**A**: as próximas fatias (8a2, 8b, 8c e 8d) entram com o de acordo da revisora, sem esperar o dono,
+enquanto seguirem o desenho. Isso substitui a segunda condição acima.
 
 ## 10. Não medido
 
