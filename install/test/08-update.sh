@@ -258,6 +258,61 @@ refuse "volta para versão sem modules.conf: o checkout apagou o modelo (como o 
 refuse "volta para versão sem modules.conf: o modules.conf gerado na ida sai" test -e "$GEN/modules.conf"
 equal "volta para versão sem modules.conf: o Asterisk não é reiniciado" 0 "$(restarts)"
 echo 0 > "$FAKE_DIR/migrate_exit"; rm -rf "$FAKE_DIR/asterisk_mounted"; cp "$REPO/deploy/asterisk/modules.conf" "$MODULES_MODEL"
+# ── O logger.conf (#603): mudado, o Asterisk recarrega o módulo logger, sem reiniciar (o log não
+#    derruba ligação). Na versão instalada (main, no git de mentira) há o logger.conf; a de destino
+#    traz um modelo diferente. ──
+LOGGER_MODEL="$DESKVOICE_DEPLOY_DIR/asterisk/logger.conf"
+# O que vai ao Asterisk, tirando as consultas de leitura da checagem de saúde (`core show uptime`,
+# `module show like pjsip`).
+asterisk_cmds() { grep ' exec -T asterisk asterisk -rx ' "$FAKE_DIR/calls.log" | sed 's/.* -rx //' | grep -Ev '^(core|module) show ' || true; }
+cp "$LOGGER_MODEL" "$FAKE_DIR/git_checkout/main/deploy/asterisk/logger.conf"
+for v in v0.9.7 v0.9.8; do
+  mkdir -p "$FAKE_DIR/git_checkout/$v/deploy/asterisk"
+  cp "$FAKE_DIR/git_checkout/v0.8.0/deploy/asterisk/extensions.conf" "$FAKE_DIR/git_checkout/$v/deploy/asterisk/"
+  { cat "$LOGGER_MODEL"; echo "; modelo da $v"; } > "$FAKE_DIR/git_checkout/$v/deploy/asterisk/logger.conf"
+done
+{ echo v0.9.8; echo v0.9.7; cat "$FAKE_DIR/git_tags"; } > "$FAKE_DIR/git_tags.next"; mv "$FAKE_DIR/git_tags.next" "$FAKE_DIR/git_tags"
+env_set "$E" DESKVOICE_VERSION 0.8.0; echo main > "$FAKE_DIR/git_at"
+inode_before="$(inode "$GEN/logger.conf")"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.7 --yes 2>&1)"; equal "logger.conf mudou: a atualização termina bem" 0 "$?"
+contains "logger.conf mudou: o disco tem o modelo novo" "$(cat "$GEN/logger.conf")" "; modelo da v0.9.7"
+equal "logger.conf mudou: regravado no lugar" "$inode_before" "$(inode "$GEN/logger.conf")"
+equal "logger.conf mudou: ao Asterisk vai exatamente 'module reload logger', e mais nada" "module reload logger" "$(asterisk_cmds)"
+equal "logger.conf mudou: não reinicia o Asterisk" 0 "$(restarts)"
+equal "logger.conf mudou: nem o para, remove ou recria à força" 0 "$(grep -cE '(stop|kill|rm -sf|rm -f|up -d --force-recreate)( .*)? asterisk$|--force-recreate' "$FAKE_DIR/calls.log")"
+contains "logger.conf mudou: diz que recarregou sem derrubar ligações" "$out" "Asterisk com a configuração desta versão (logger.conf), recarregada sem derrubar ligações"
+refuse "logger.conf mudou: nada fica pendente" test -e "$GEN/.reload-pending"
+# O contêiner preso a um logger.conf antigo (o kit anterior regravava por renomeação): recarregar
+# releria o antigo, e só reiniciar resolve. É o laço do converge_asterisk que o enxerga.
+mkdir -p "$FAKE_DIR/asterisk_mounted"; cp "$GEN"/*.conf "$FAKE_DIR/asterisk_mounted/"; echo "; de antes" >> "$FAKE_DIR/asterisk_mounted/logger.conf"
+: > "$FAKE_DIR/calls.log"; out="$(converge_asterisk 2>&1)"
+equal "logger.conf preso ao arquivo antigo: reinicia o Asterisk uma vez" 1 "$(restarts)"
+equal "logger.conf preso ao arquivo antigo: não recarrega" 0 "$(reloads)"
+contains "logger.conf preso ao arquivo antigo: diz por quê" "$out" "o contêiner ainda lê a versão antiga de logger.conf"
+rm -rf "$FAKE_DIR/asterisk_mounted"
+# A volta para uma versão de antes do logger.conf: a instalada (main) não o tem, nem o Compose dela
+# o monta; a de destino o traz, mudado, e a migration falha. Fica o logger.conf que a instalação já
+# tinha gerado, que a ida regrava e anota para recarregar. O checkout da volta apaga o modelo; o
+# gerado sai, sai da lista do que recarregar, e o Compose da volta não monta arquivo que não existe.
+rm -f "$FAKE_DIR/git_checkout/main/deploy/asterisk/logger.conf"
+grep -v '/etc/asterisk/logger.conf' "$REPO/deploy/docker-compose.yml" > "$FAKE_DIR/git_checkout/main/deploy/docker-compose.yml"
+cp "$REPO/deploy/docker-compose.yml" "$FAKE_DIR/git_checkout/v0.9.8/deploy/"
+cp "$FAKE_DIR/git_checkout/main/deploy/docker-compose.yml" "$DESKVOICE_DEPLOY_DIR/docker-compose.yml"
+env_set "$E" DESKVOICE_VERSION 0.8.0; echo main > "$FAKE_DIR/git_at"
+echo 1 > "$FAKE_DIR/migrate_exit"; : > "$FAKE_DIR/calls.log"
+out="$(bash "$KIT/update.sh" --to 0.9.8 --yes 2>&1)"; equal "volta para versão sem logger.conf: sai com erro (a migration falhou)" 1 "$?"
+contains "volta para versão sem logger.conf: foi desfeita" "$out" "foi desfeita: você está de volta na versão 0.8.0"
+lacks "volta para versão sem logger.conf: não diz que a volta não terminou bem" "$out" "não terminou bem"
+refuse "volta para versão sem logger.conf: o checkout apagou o modelo (como o git de verdade)" test -e "$LOGGER_MODEL"
+refuse "volta para versão sem logger.conf: o logger.conf gerado sai" test -e "$GEN/logger.conf"
+refuse "volta para versão sem logger.conf: nada fica pendente" test -e "$GEN/.reload-pending"
+equal "volta para versão sem logger.conf: nada vai ao Asterisk (o logger.conf saiu da lista do que recarregar)" "" "$(asterisk_cmds)"
+equal "volta para versão sem logger.conf: o Asterisk não é reiniciado" 0 "$(restarts)"
+lacks "volta para versão sem logger.conf: o Compose da volta não monta o logger.conf" "$(cat "$DESKVOICE_DEPLOY_DIR/docker-compose.yml")" "generated/logger.conf"
+missing=""; for m in $(sed -nE 's#^[[:space:]]*- \./asterisk/generated/([^:]+):.*#\1#p' "$DESKVOICE_DEPLOY_DIR/docker-compose.yml"); do [ -e "$GEN/$m" ] || missing="$missing $m"; done
+equal "volta para versão sem logger.conf: todo arquivo que o Compose monta existe" "" "$missing"
+echo 0 > "$FAKE_DIR/migrate_exit"; cp "$REPO/deploy/asterisk/logger.conf" "$LOGGER_MODEL"; cp "$REPO/deploy/docker-compose.yml" "$DESKVOICE_DEPLOY_DIR/docker-compose.yml"
+env_set "$E" DESKVOICE_VERSION 0.8.0; echo main > "$FAKE_DIR/git_at"
 # ── Imagens de terceiros: sai a que o Compose da versão de onde se saiu fixava por resumo e o da nova
 #    não fixa mais (issue #163). Só a referência exata; a de outro sistema e a que segue fixada ficam. ──
 pins() { sed -nE 's/^[[:space:]]*image:[[:space:]]*(\$\{[A-Z_]+:-)?([^}[:space:]]+@sha256:[0-9a-f]{64})\}?[[:space:]]*$/\2/p' "$DESKVOICE_DEPLOY_DIR/docker-compose.yml"; }
