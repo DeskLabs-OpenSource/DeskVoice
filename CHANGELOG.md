@@ -3,6 +3,41 @@
 O que muda em cada versão do DeskVoice, na voz de quem opera a instalação.
 Este arquivo é montado a partir de `.changes/`; não edite à mão.
 
+## [0.53.0] - 2026-11-28
+
+### Adicionado
+
+- **O conector DeskcommCRM manda a mensagem pelo próprio CRM, pelo canal escolhido** Em Configurações → WhatsApp → Avançado, o conector DeskcommCRM ganha o modo "Pelo contrato do CRM": você informa o endereço do CRM e um token dele, e as mensagens e os avisos saem pela rota de mensagens do CRM. O botão "Conferir o CRM" testa o token na porta do MCP e na REST, só lendo, avisa quando o token é só-MCP (a REST o recusa, e a mensagem não sairia) e lista os canais de mensagem do CRM, para escolher por onde a mensagem sai; sem canal escolhido, o CRM decide pela regra dele. Na tela do agente, a opção "Quando a ligação cai" passa a dizer o canal do CRM. Quem já instalou não vê diferença: um conector DeskcommCRM gravado antes fica no modo "Por um endereço próprio (formato antigo)" e continua mandando para o endereço que foi digitado, e passar ao modo novo pede o token de novo. Crédito: @edgariamaguti.
+
+### Corrigido
+
+- **O aviso de faixa sobreposta vale para toda edição que coloca a linha no ar** O aviso de faixa sobreposta passa a valer para toda edição que põe a linha no ar. Nada a configurar.
+  Crédito: @melgarafael.
+- **A transcrição de quem ligou no motor OpenAI Realtime entra no extrato e no teto de custo** Toda ligação pelo motor OpenAI Realtime pede à OpenAI uma transcrição à parte da fala de quem ligou, com o modelo `gpt-4o-mini-transcribe`, e a OpenAI cobra essa transcrição pelo preço desse modelo. Até aqui, esse consumo não aparecia no extrato da ligação, nem contava para o teto de custo por ligação. Agora cada transcrição vira uma linha no extrato, no motor OpenAI Realtime e com o modelo da transcrição, soma ao custo da ligação e conta para o teto. Quando a OpenAI não informa o consumo, ele é estimado pelo áudio de quem ligou, e a linha sai marcada como estimada. O valor é pequeno, cerca de US$ 0,003 por minuto de fala, mas o custo das ligações pelo OpenAI Realtime fica um pouco maior que antes, porque agora mostra o que a OpenAI já cobrava. As ligações que já aconteceram não mudam. Quem já instalou não precisa fazer nada. Crédito: @melgarafael.
+- **A tela do agente diz que teto de custo zero é "sem teto"** Em Agentes → Avançado, o campo "Teto de custo, em dólares" agora explica que zero quer dizer "sem
+  teto", e que um valor que arredonda para US$ 0,00, como 0,004, também vira zero. Quando o valor
+  digitado deixa o agente sem teto, a tela avisa em destaque. O comportamento não muda: zero continua
+  sendo "sem teto" para este agente, e um teto de outro agente por onde a ligação passou continua valendo. O guia de custos diz o mesmo. Nada a
+  configurar. Crédito: @melgarafael.
+- **O teto diário de ligações de saída não zera quando a linha ou o número muda** Antes, trocar o número de uma linha telefônica no meio do dia zerava a contagem do teto diário de
+  ligações de saída daquela linha, e ela podia fazer outra leva de ligações. Agora cada ligação de
+  saída guarda a linha por onde saiu, e o teto do dia conta o que saiu pela linha ou pelo número que
+  ela usa agora, sem contar a mesma ligação duas vezes. Trocar o número, passar o número para outra
+  linha ou apagar a linha e criar outra com o mesmo número não devolve ligações ao teto no mesmo dia.
+  O teto fica um pouco mais estrito nesses casos de borda. As ligações feitas antes da atualização
+  herdam a linha cujo número é hoje o de saída delas. Nada a configurar. Crédito: @melgarafael.
+- **No teto de gasto do mês, o trabalho pago depois da ligação também para** Antes, a organização que chegava ao teto de gasto do mês tinha a ligação nova recusada, mas o
+  desfecho, a análise e a transcrição da gravação (a automática e o botão "Transcrever") seguiam
+  pedindo ao provedor e somando no extrato. Agora os três conferem o mesmo teto do mês antes de
+  pedir qualquer coisa ao provedor. No teto, nada é enviado nem cobrado, e a linha do tempo da
+  ligação diz que o teto do mês foi atingido. O botão "Transcrever" mostra o mesmo motivo. Quem
+  administra a instalação pode mudar o teto. Nada a configurar. Crédito: @melgarafael.
+- **A mensagem de WhatsApp da ligação que caiu confere a lista de não ligar na hora do envio** Antes, a lista de não ligar era conferida só quando a ligação caía e a mensagem entrava na fila. Um
+  número posto na lista logo depois ainda recebia a mensagem. Agora a lista é conferida de novo na hora
+  do envio, e também a cada nova tentativa. Se o número está na lista, a mensagem não sai, nenhuma
+  pendência é aberta e a linha do tempo da ligação diz por que ela não saiu. Nada a configurar.
+  Crédito: @melgarafael.
+
 ## [0.52.0] - 2026-11-27
 
 ### Adicionado
