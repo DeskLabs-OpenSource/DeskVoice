@@ -20,7 +20,7 @@ export const GET = handle({}, async ({ q }) => {
     const { baseUrl, model } = targetOf(engine.id);
     return baseUrl === null && model !== null && engine.classifyPricing?.(model) === undefined;
   };
-  const unavailable = await pipelineUnavailable();
+  const unavailable = await pipelineUnavailable(q);
   return (await listEngines()).map((engine) => ({
     id: engine.id,
     label: engine.label,

@@ -281,6 +281,13 @@ describe("linha do tempo", () => {
       expect(render("drop_follow_up_result", { action: "whatsapp_failed" })).toContain(r.whatsapp_failed);
     });
 
+    it("a mensagem barrada na hora do envio pela lista de não ligar tem a frase própria, e não a da falha", () => {
+      const html = render("drop_follow_up_result", { action: "whatsapp_do_not_call" });
+      expect(html).toContain(r.whatsapp_do_not_call);
+      expect(html).not.toContain(r.whatsapp_failed);
+      for (const dict of [ptBR, enTimeline, esTimeline]) expect(dict.events.drop_follow_up_result.whatsapp_do_not_call).toMatch(/\S/);
+    });
+
     it("a tentativa que saiu diz isso, com o link para a religação", () => {
       const html = render("drop_follow_up_result", { action: "call_back_placed", attempt: 1, callId: CALL_BACK });
       expect(html).toContain("A religação saiu (tentativa 1).");

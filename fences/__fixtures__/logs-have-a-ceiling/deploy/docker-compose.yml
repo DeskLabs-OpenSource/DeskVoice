@@ -1,0 +1,21 @@
+x-app: &app
+  logging: &logging
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  panel:
+    <<: *app
+    image: localhost/panel:dev
+  voice:
+    image: localhost/voice:dev
+    logging:
+      driver: json-file
+      options: { max-file: "5" }
+  routines:
+    image: localhost/routines:dev
+    logging: { driver: none }
+  asterisk:
+    image: andrius/asterisk@sha256:927d4c98777149c3380c4f8d0e82b1b1ba9e7b38528f86c1e1593d5a25032f27
+    volumes:
+      - ./asterisk/generated/modules.conf:/etc/asterisk/modules.conf:ro

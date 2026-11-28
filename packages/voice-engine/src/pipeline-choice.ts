@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { BrainPrice } from "./brain";
-import type { SpeechSynthesizer } from "./types";
+import type { SpeechSynthesizer, StreamingTranscriber } from "./types";
 
 /**
  * A escolha gravada em `agents.pipeline` (desenho do pipeline, seção 3.3 e fatia 3): uma forma só,
@@ -77,3 +77,11 @@ export type PieceConsent = z.infer<typeof storedConsent>;
 export const readConsent = (value: unknown): PieceConsent | null => storedConsent.safeParse(value).data ?? null;
 /** Onde a tela grava a confirmação da voz. Sai junto com a chave. */
 export const synthesizerConsentSetting = (id: string): string => `synthesizer.${id}.consent`;
+/**
+ * Onde a tela grava a confirmação da transcrição de fora do servidor (seção 9.1, fatia 6): "O áudio da
+ * pessoa na ligação vai para <fornecedor>". Na mesma forma da voz. A transcrição da OpenAI não tem
+ * chave própria (usa a do motor), e por isso a confirmação tem rota própria, e não sai com a chave.
+ */
+export const transcriberConsentSetting = (id: string): string => `transcriber.${id}.consent`;
+/** A chave da organização que a transcrição usa: a declarada pela peça (`keySetting`), ou `transcriber.<id>.api_key`. */
+export const transcriberKeySettingOf = (piece: Pick<StreamingTranscriber, "id" | "keySetting">): string => piece.keySetting ?? `transcriber.${piece.id}.api_key`;

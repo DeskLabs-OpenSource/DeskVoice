@@ -65,6 +65,8 @@ import {
   speechFilterQuestions,
   speechFilterState,
   synthesizerConsentSetting,
+  transcriberConsentSetting,
+  transcriberKeySettingOf,
   type AnalystConfig,
   type AnalystTurn,
   type Brain,
@@ -73,6 +75,7 @@ import {
   type EnginePricing,
   type KeyCheckResult,
   type PieceUsageLine,
+  type SideUsageLine,
   type PipelineEngine,
   type PipelineChoice,
   type PipelineOpening,
@@ -273,6 +276,11 @@ interface Leg {
   piece?: LegPiece;
   /** O consumo e o custo da peça neste trecho, com o preço dela. A peça que passa adiante leva só o consumo de depois. */
   transcriber: { usage: LegUsage; costCents: number };
+  /**
+   * O consumo e o custo do modelo que o motor pede à parte, na mesma sessão, com o preço dele (a
+   * transcrição de quem ligou no OpenAI Realtime, item 3.4 da revisão fria da 0.50.0).
+   */
+  side: { usage: LegUsage; costCents: number };
   /** O último `error` do motor, para explicar um `closed` que venha em seguida. */
   lastError?: Error;
   /** O analista do agente do trecho (fatia 3 da R6), aberto antes do motor. Ausente, nada muda. */
@@ -306,7 +314,7 @@ interface LegPiece {
 }
 
 /** A peça que o agente de um trecho pede, já com a chave lida, ou a chave que não serve. */
-type PieceChoice = { transcriber: StreamingTranscriber; apiKey: string; config: LegPiece["config"] } | { rejected: string; detail: string };
+type PieceChoice = { transcriber: StreamingTranscriber; apiKey: string; config: LegPiece["config"] } | { rejected: string; reason: "rejected" | "unconfirmed"; detail: string };
 
 /** O analista aberto para um trecho: o modelo de decisão, a chave e o cadastro lido no começo do trecho. */
 interface LegAnalyst {
@@ -734,19 +742,23 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   }
 
   /**
-   * Mede um incremento de consumo no trecho. Quem consome é o motor do trecho ou a peça de
-   * transcrição dele, cada um com o preço dele: o custo do trecho é motor + peça, e o da ligação, a
-   * soma dos trechos, que respeita o teto.
+   * Mede um incremento de consumo no trecho. Quem consome é o motor do trecho, a peça de transcrição
+   * dele ou o modelo que o motor pede à parte (`side`), cada um com o preço dele: o custo do trecho é
+   * motor + peça + modelo à parte, e o da ligação, a soma dos trechos, que respeita o teto.
    */
-  async function meter(from: Leg, increment: Usage, piece?: { id: string; pricing: EnginePricing }): Promise<void> {
+  async function meter(from: Leg, increment: Usage, piece?: { id: string; pricing: EnginePricing }, side?: SideUsageLine): Promise<void> {
     if (piece) {
       accumulate(from.transcriber.usage, increment);
       from.transcriber.costCents = estimateCostCents(piece.pricing, from.transcriber.usage);
+    } else if (side) {
+      // Os segundos dele são do áudio que ele ouviu, e não somam à duração da ligação.
+      accumulate(from.side.usage, increment);
+      from.side.costCents = estimateCostCents(side.pricing, from.side.usage);
     } else {
       usage.seconds += increment.seconds ?? 0;
       accumulate(from.usage, increment);
     }
-    from.costCents = estimateCostCents(from.engine.pricing, from.usage) + from.transcriber.costCents;
+    from.costCents = estimateCostCents(from.engine.pricing, from.usage) + from.transcriber.costCents + from.side.costCents;
     // Cada trecho é calculado com o preço do motor dele, e o custo da ligação é a soma dos trechos:
     // com dois agentes em motores de preço diferente, um preço só erraria a conta.
     // `usage` é incremento: o custo sai do total somado, e cada linha do extrato leva a diferença.
@@ -756,12 +768,14 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     costCents = total;
     const reached = reachCeiling(callCents());
     await q.exec(
-      "insert into usage_ledger (organization_id, call_id, engine, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+      "insert into usage_ledger (organization_id, call_id, engine, model, agent_id, seconds, input_tokens, output_tokens, cost_cents, cost_microcents, cost_estimated, at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
       [
         organizationId,
         callId,
-        // A peça tem linha própria no extrato, e não se confunde com um motor de mesmo id.
+        // A peça tem linha própria no extrato, e não se confunde com um motor de mesmo id. O modelo à
+        // parte fica no motor do trecho, que é quem o pede, com o modelo dele na coluna `model`.
         piece ? `transcriber:${piece.id}` : from.engine.id,
+        side?.model ?? null,
         // O agente do trecho, e não o que atendeu: o custo por agente continua verdadeiro com passagem.
         from.agent.id,
         Math.round(increment.seconds ?? 0),
@@ -772,6 +786,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         // centavo inteiro, para o extrato somar na mesma unidade do resto (a classificação, que é
         // menor que um centavo).
         delta * MICROCENTS_PER_CENT,
+        // O provedor não informou o consumo: o motor o contou, e o custo entra no total e no teto.
+        side?.estimated ?? false,
         clock.now(),
       ],
     );
@@ -1314,6 +1330,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   function pipelineRefusalNotice(agentName: string, piece: PieceRefusal | undefined, refusedFor?: EngineRefusal): string {
     const which = piece ? `${PIECE_NAMES[piece.kind]} (${piece.id})` : "as peças do pipeline";
     if (piece && refusedFor === "pipeline_piece_unconfirmed") {
+      if (piece.kind === "transcriber")
+        return `Uma ligação do agente ${agentName} foi recusada porque ${which} leva o áudio de quem ligou para fora deste servidor, e ninguém confirmou o envio. Nada foi enviado, e a ligação não começou. Quem ligou ouviu o sinal de falha. Confirme o fornecedor no bloco Pipeline do agente e faça uma chamada de teste.`;
       return `Uma ligação do agente ${agentName} foi recusada porque ${which} leva o texto que o agente fala para fora deste servidor, e ninguém confirmou o envio. Nada foi enviado, e a ligação não começou. Quem ligou ouviu o sinal de falha. Confirme o fornecedor em Configurações → Voz e faça uma chamada de teste.`;
     }
     if (piece && refusedFor === "pipeline_piece_test_only") {
@@ -1374,7 +1392,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         return refuse("pipeline_piece_test_only", `the simulated ${kind} only serves tests`, { kind, id: piece.id });
       }
     }
-    const transcriberKey = transcriber.keyless ? "" : await readKey(transcriberKeySetting(transcriber.id));
+    // A transcrição da OpenAI usa a chave do motor OpenAI Realtime (`keySetting`, fatia 6): não há chave nova.
+    const transcriberKey = transcriber.keyless ? "" : await readKey(transcriberKeySettingOf(transcriber));
     if (transcriberKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the transcriber ${transcriber.id}`, { kind: "transcriber", id: transcriber.id, detail: "rejected" });
     const brainKey = await readKey(brainKeySetting(brain.id));
     if (brainKey === undefined) return refuse("engine_not_configured", `no usable API key is saved for the brain ${brain.id}`, { kind: "brain", id: brain.id, detail: "rejected" });
@@ -1384,6 +1403,11 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     // fornecedor (seção 9.1), além da chave: a mesma regra da gravação do agente (fatia 5a). A
     // confirmação é lida a cada ligação: apagada depois de o agente salvar, a ligação não abre, e nada
     // sai para o fornecedor (a recusa vem antes de qualquer peça abrir).
+    // A transcrição de fora do servidor, pela mesma regra, com a confirmação dela (fatia 6): o áudio de quem ligou vai ao fornecedor.
+    if (transcriber.processingLocation.kind !== "this-server") {
+      const consent = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, transcriberConsentSetting(transcriber.id)]);
+      if (readConsent(consent?.value) === null) return refuse("pipeline_piece_unconfirmed", `nobody confirmed that the caller's audio goes to ${transcriber.label}`, { kind: "transcriber", id: transcriber.id });
+    }
     if (synthesizer.processingLocation.kind !== "this-server") {
       const consent = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, synthesizerConsentSetting(synthesizer.id)]);
       if (readConsent(consent?.value) === null) return refuse("pipeline_piece_unconfirmed", `nobody confirmed that the text of the call goes to ${synthesizer.label}`, { kind: "synthesizer", id: synthesizer.id });
@@ -1533,6 +1557,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
         latency.guardActed(guardTurn);
         session.say(text);
       },
+      answering: () => session.answering?.() === true,
       acted: (report) => {
         // O pedido zera o fato no mesmo instante do `caller_unanswered`: vale só a fala depois do último.
         if (report.action === "asked_to_repeat") callerSpokeAfterAsk = false;
@@ -1561,6 +1586,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       usage: emptyUsage(),
       costCents: 0,
       transcriber: { usage: emptyUsage(), costCents: 0 },
+      side: { usage: emptyUsage(), costCents: 0 },
       ...(analyst && { analyst }),
       guided: new Set(),
       toolsInFlight: new Map(),
@@ -1650,6 +1676,8 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
     });
     // A última medição de uma sessão substituída também conta, e no trecho dela.
     session.on("usage", (increment) => void meter(self, increment).catch(logFailure("could not record usage")));
+    // O modelo que o motor pede à parte (a transcrição do OpenAI Realtime): linha própria, no trecho dela.
+    session.on("sideUsage", (line) => void meter(self, line.usage, undefined, line).catch(logFailure("could not record side usage")));
     // O motor trocou a conexão com o provedor sem fechar a sessão: só fica registrado.
     session.on("resumed", () => {
       if (!current()) return;
@@ -1834,7 +1862,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
   }
 
   /** Por que a peça de transcrição ficou fora da chamada: o vocabulário do teste da chave, ou `closed`. */
-  type TranscriberFailure = Exclude<KeyCheckResult, "accepted" | "not_needed"> | "closed";
+  type TranscriberFailure = Exclude<KeyCheckResult, "accepted" | "not_needed"> | "closed" | "unconfirmed";
 
   /** A peça de um trecho ficou de fora; a ligação segue. Depois de uma passagem, o evento leva o agente do trecho, como `transcript_agent`. */
   function transcriberFailed(owner: Leg, transcriberId: string, reason: TranscriberFailure, detail: string): void {
@@ -1858,14 +1886,20 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       return undefined;
     }
     const config = { language: row.language, vocabulary: row.vocabulary.slice(0, transcriber.maxVocabulary) };
+    // A peça de fora do servidor leva o áudio de quem ligou ao fornecedor: só abre com a confirmação
+    // da seção 9.1, a mesma regra de `connectPipeline`. Sem ela, a peça fica de fora e a ligação segue.
+    if (transcriber.processingLocation.kind !== "this-server") {
+      const consent = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, transcriberConsentSetting(transcriber.id)]);
+      if (readConsent(consent?.value) === null) return { rejected: transcriber.id, reason: "unconfirmed", detail: `nobody confirmed that the caller's audio goes to ${transcriber.label}` };
+    }
     if (transcriber.keyless) return { transcriber, apiKey: "", config };
-    const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, transcriberKeySetting(transcriber.id)]);
+    const stored = await q.one<{ value: unknown }>("select value from settings where organization_id = $1 and key = $2", [organizationId, transcriberKeySettingOf(transcriber)]);
     try {
       if (typeof stored?.value !== "string") throw new Error("no API key is saved for this transcriber");
       return { transcriber, apiKey: decryptSecret(stored.value, deps.secretKey), config };
     } catch (error) {
       // Sem chave que sirva, a peça não abre: para quem lê a linha do tempo, é a chave recusada.
-      return { rejected: transcriber.id, detail: messageOf(error) };
+      return { rejected: transcriber.id, reason: "rejected", detail: messageOf(error) };
     }
   }
 
@@ -1899,7 +1933,7 @@ export function startCallSession(deps: CallSessionDeps, input: CallSessionInput)
       return Promise.resolve();
     }
     const leaving = from ? closePiece(from) : Promise.resolve();
-    if (choice && "rejected" in choice) transcriberFailed(next, choice.rejected, "rejected", choice.detail);
+    if (choice && "rejected" in choice) transcriberFailed(next, choice.rejected, choice.reason, choice.detail);
     else if (choice) {
       const piece: LegPiece = { transcriber: choice.transcriber, config: choice.config, owner: next, gone: false };
       next.piece = piece;

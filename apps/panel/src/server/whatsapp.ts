@@ -1,5 +1,5 @@
 import { enqueueTask, withOrg, type OrgQuery } from "@deskvoice/core";
-import { loadWhatsAppConnector, sendWhatsApp } from "@deskvoice/tools/whatsapp";
+import { checkDeskcomm, loadWhatsAppConnector, sendWhatsApp, type DeskcommCheck } from "@deskvoice/tools/whatsapp";
 import { WahaError, sendViaWaha, wahaEnsureSession, wahaGetQr, wahaGetSession, wahaLogoutSession, wahaSessionName, wahaStartSession, wahaStopSession, type WahaSession } from "@deskvoice/tools/waha";
 import { z } from "zod";
 import en from "../i18n/en/whatsapp";
@@ -312,4 +312,18 @@ export async function sendTest(deps: ServerDeps, session: Session, to: string | 
   }
   const { addressVerified } = await waha(() => sendViaWaha(deps.waha, wahaSessionName(session.organizationId), { to, text }));
   return { to, addressVerified };
+}
+
+/**
+ * Confere o CRM do conector `deskcomm` pelas duas portas, com o token gravado (#330, fatia 2b): o
+ * MCP, por onde vai a agenda, e a REST, por onde vão a mensagem e a criação do contato. Devolve os
+ * canais de mensagem do CRM, para a tela oferecer a escolha pelo nome. Nada sai para quem ligou, e o
+ * token não volta para a tela. Só com o endereço do CRM gravado: o conector antigo, sem ele, manda
+ * para um endereço que pode ser um intermediário, e não há CRM para conferir.
+ */
+export async function checkCrm(deps: ServerDeps, session: Session): Promise<DeskcommCheck> {
+  const connector = await withOrg(deps.db, session.organizationId, (q) => loadWhatsAppConnector(q, deps.secretKey));
+  if (connector === null || connector.type !== "deskcomm" || connector.crmUrl === undefined)
+    throw new ApiError(409, "deskcomm_crm_not_configured", "Save the DeskcommCRM connector with the CRM address first.");
+  return checkDeskcomm({ crmUrl: connector.crmUrl, token: connector.token }, { fetch: deps.fetch, lookup: deps.lookup });
 }

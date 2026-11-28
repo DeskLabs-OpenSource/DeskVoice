@@ -196,7 +196,21 @@ describe("agents.pipeline: as recusas, 422 com a peça, e nada gravado", () => {
       { consent: false },
     );
     fakes.on = true;
-    await refused("pipeline transcricao de fora", { ...CHOICE, transcriber: "de-fora" }, { code: "pipeline_piece_unconfirmed", piece: "transcriber", pieceId: "de-fora", says: ["Transcrição de fora", "caller's audio", "outside this server"] });
+    await refused("pipeline transcricao de fora", { ...CHOICE, transcriber: "de-fora" }, { code: "pipeline_piece_unconfirmed", piece: "transcriber", pieceId: "de-fora", says: ["Transcrição de fora", "caller's audio", "outside this server", "Pipeline block"] });
+  });
+
+  it("4b (9.1, fatia 6): a transcrição da OpenAI passa com a confirmação gravada; sem ela, a recusa diz qual é", async () => {
+    const { org, cookie } = await setup("pipeline transcricao openai");
+    const choice = { ...CHOICE, transcriber: "openai" };
+    const refusedResult = await create(cookie, { pipeline: choice });
+    expect([refusedResult.status, refusedResult.code, detail(refusedResult)]).toEqual([422, "pipeline_piece_unconfirmed", { piece: "transcriber", pieceId: "openai" }]);
+    await withOrg(panel.app, org, async (q) => {
+      const owner = await q.one<{ id: string }>("select id from users limit 1");
+      await put(q, org, "transcriber.openai.consent", { userId: owner?.id ?? "", confirmedAt: NOW.toISOString() });
+    });
+    const created = await create(cookie, { pipeline: choice });
+    expect(created.status).toBe(200);
+    expect((created.data as Agent).pipeline).toEqual(choice);
   });
 
   it("5: o transcritor simulado fora do ambiente de teste (a instalação nunca o liga)", async () => {
@@ -322,16 +336,23 @@ describe("o motor pipeline na pasta: listado desligado, e nunca o motor de um ag
     const engines = (await call(listEngines, { cookie })).data as EngineView[];
     expect(engines.map((engine) => engine.id).sort()).toEqual(["gemini-live", "openai-realtime", "pipeline", "simulated"]);
     const pipeline = engines.find((engine) => engine.id === "pipeline");
-    expect(pipeline).toMatchObject({ assembled: true, unavailable: { reason: "no_live_transcriber" }, requiresKey: false, keyConfigured: false });
+    expect(pipeline).toMatchObject({ assembled: true, unavailable: { reason: "no_transcriber_key" }, requiresKey: false, keyConfigured: false });
     expect(Object.keys(pipeline ?? {}).sort()).toEqual([...ENGINE_FIELDS, "assembled", "unavailable"].sort());
     for (const engine of engines.filter((each) => each.id !== "pipeline")) expect(Object.keys(engine).sort(), engine.id).toEqual(ENGINE_FIELDS);
   });
 
-  it("com uma transcrição real na pasta, a marca sai (a regra é a da pasta, e não um texto fixo)", async () => {
-    fakes.on = true;
-    const { cookie } = await setup("pipeline com transcricao real");
-    const pipeline = ((await call(listEngines, { cookie })).data as EngineView[]).find((engine) => engine.id === "pipeline");
-    expect(pipeline?.unavailable).toBeNull();
+  it("com a transcrição da OpenAI na pasta, a marca sai quando a organização tem a chave do motor OpenAI Realtime, e só nela (fatia 6)", async () => {
+    const { org, cookie } = await setup("pipeline com transcricao real");
+    const other = await setup("pipeline sem a chave");
+    const before = ((await call(listEngines, { cookie })).data as EngineView[]).find((engine) => engine.id === "pipeline");
+    expect(before?.unavailable).toEqual({ reason: "no_transcriber_key" });
+    // A chave de outro nome não liga nada: só a que a peça declara.
+    await withOrg(panel.app, org, (q) => put(q, org, "transcriber.openai.api_key", encryptSecret("chave-inventada", SECRET_KEY), true));
+    expect(((await call(listEngines, { cookie })).data as EngineView[]).find((engine) => engine.id === "pipeline")?.unavailable).toEqual({ reason: "no_transcriber_key" });
+    await withOrg(panel.app, org, (q) => put(q, org, "engine.openai-realtime.api_key", encryptSecret("chave-inventada-do-motor", SECRET_KEY), true));
+    expect(((await call(listEngines, { cookie })).data as EngineView[]).find((engine) => engine.id === "pipeline")?.unavailable).toBeNull();
+    // A chave é da organização: a outra continua desligada.
+    expect(((await call(listEngines, { cookie: other.cookie })).data as EngineView[]).find((engine) => engine.id === "pipeline")?.unavailable).toEqual({ reason: "no_transcriber_key" });
   });
 
   it("ninguém grava o pipeline como motor: nem no POST, nem no PATCH, nem como o motor padrão; e nada muda", async () => {

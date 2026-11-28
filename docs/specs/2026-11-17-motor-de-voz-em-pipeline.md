@@ -654,6 +654,93 @@ O transcritor real escolhido pela R12 (fatia 3 da R12) entra no pipeline sem mud
 motor: é uma peça da pasta. A medida da seção 3.5 na chamada real (30 turnos, uma ferramenta) fica
 registrada no PR e nesta seção. É o aceite da frente.
 
+**Pendência antes da ligação real: a concordância não pode cortar o agente** (nota da revisora no
+#573, comentário 7171910478, 25/11; registrada pelo board na DESA-397). Hoje, pela fatia 4, qualquer
+texto novo de quem ligou corta a resposta do cérebro, inclusive "aham", "sim" e "tá", ditos só para
+mostrar que está ouvindo. O modo Barulhento não ajuda: lá só texto interrompe (lição da R11), e a
+concordância chega como texto. **A fatia 6 não fica pronta sem uma regra para isso, medida na
+bancada.**
+
+- **As regras candidatas** (não decididas; a medida escolhe):
+  - **R-lista:** enquanto a resposta do cérebro sai, um trecho (parcial ou final) cujo texto,
+    em minúsculas e sem pontuação, só tem palavras de concordância do idioma do agente não
+    interrompe. Lista inicial:
+    - pt-BR: "aham", "uhum", "hum", "hã", "sim", "é", "tá", "certo", "ok", "isso", "entendi", "sei";
+    - en: "uh-huh", "mhm", "hmm", "yeah", "yes", "ok", "okay", "right", "sure", "got it", "i see";
+    - es: "ajá", "mhm", "sí", "vale", "claro", "ok", "entiendo", "ya".
+    "Não", "no", "espera" e "wait" nunca entram na lista. Quando a parcial cresce ("sim, mas…"), o
+    corte acontece na primeira palavra fora da lista.
+  - **R-lista + mínimo:** a R-lista e, além dela, o corte só acontece com pelo menos 2 palavras fora
+    da lista, ou com 1 palavra fora da lista e 600 ms de fala desde o início do trecho.
+  - A concordância que não corta entra na transcrição e vai ao cérebro no próximo pedido, mas não
+    abre pedido sozinha.
+- **A medida que decide**, na bancada da R12, pela linha estreita (8 kHz) e pelo transcritor da
+  fatia 6:
+  - **Corpus, por idioma (pt-BR, en, es):** 40 turnos com concordância falada no meio de uma resposta
+    do agente de pelo menos 4 s (as palavras da lista, sozinhas e repetidas), e 40 turnos com
+    interrupção de verdade ("não, espera", "mas eu queria outra coisa", uma pergunta nova, um
+    número). A mesma gravação roda sem regra (o de hoje) e com cada regra.
+  - **Números, por idioma e por regra:**
+    - falsos cortes: concordâncias que cortaram, sobre 40;
+    - cortes perdidos: interrupções de verdade que não cortaram, sobre 40;
+    - atraso acrescentado: p50 e p95 de (tempo até o `interrupted` com a regra) menos (tempo sem
+      regra), no mesmo áudio.
+  - **Régua proposta:** falsos cortes ≤ 2 em 40, nenhum corte perdido, e atraso acrescentado no p95
+    ≤ 300 ms, nos três idiomas. Vence a regra mais simples que passa. Se nenhuma passa, a fatia 6
+    para e volta ao Arquiteto com a tabela.
+  - **Os testes da regra escolhida**, sem bancada: a lista nos três idiomas; "não" corta; "sim, mas"
+    corta na palavra "mas"; a concordância vai à transcrição e não abre pedido; a fala pronta e o
+    `say` continuam sem corte.
+  - A tabela vai ao PR da fatia 6 e a esta seção, com o comando e a data.
+
+**6a, parte 1: a transcrição da OpenAI como peça provisória (DESA-469, opção B da DESA-398, decisão 2).**
+O pedido do Rafael de 26/11 (a ligação real com a ElevenLabs) não espera o vencedor da R12. A peça é
+`transcribers/openai.ts`, no contrato `StreamingTranscriber`. É o `gpt-4o-mini-transcribe`, o mesmo do
+OpenAI Realtime, numa sessão só de transcrição (`?intent=transcription`), em μ-law a 8 kHz, com a
+detecção de fala do servidor (`server_vad`). Os itens saem na ordem em que o servidor os fecha. O
+`endMs` é o `audio_end_ms` menos o silêncio que o servidor esperou. O custo vem de cada `completed`:
+em tokens, em segundos, ou, sem `usage`, pela duração do item, ao preço por minuto.
+- **A chave é a do motor OpenAI Realtime** (`engine.openai-realtime.api_key`), sem chave nova. O
+  contrato ganhou o campo opcional `keySetting`. A sessão (`call-session.ts`) e o painel leem a chave
+  por `transcriberKeySettingOf`. Sem o campo, a chave segue em `transcriber.<id>.api_key`.
+- **A confirmação da 9.1** fica em `transcriber.<id>.consent`, com o recibo
+  `transcriber_provider_confirmed`, na forma da 1b. O texto é "O áudio da pessoa na ligação vai para a
+  OpenAI". Como não há chave para gravar, a confirmação tem rota própria:
+  `PUT|DELETE /api/v1/transcribers/{id}/consent`, com o botão no bloco Pipeline. `GET /api/v1/transcribers`
+  diz se a chave existe e quem confirmou. A gravação do agente (`requirePipeline`) e a abertura da ligação
+  conferem a confirmação, com o mesmo `pipeline_piece_unconfirmed`, agora também para a transcrição.
+- **O pipeline deixa de aparecer desligado** na organização que tem uma transcrição de verdade na
+  pasta e a chave dela. `unavailable` passa a ser por organização: `no_live_transcriber` (a pasta sem
+  transcrição de verdade) ou `no_transcriber_key` (sem a chave). Com as duas, `null`, e o campo Motor
+  diz "Pipeline", com a linha de que ele está pronto.
+- **Fica de fora desta parte:** a escolha das peças pela tela (o bloco ainda não grava
+  `agents.pipeline`; a API do agente grava), pergunta ao Arquiteto na DESA-469. Também fica de fora a
+  regra da concordância, num PR depois deste (ordem do board de 26/11, fatias de até ~400 linhas).
+- **Não medido:** a peça contra a OpenAI de verdade (nenhuma chamada com chave). Não foi medido se a
+  sessão de transcrição aceita `audio/pcmu` (o guia só mostra `audio/pcm` a 24 kHz; a referência aceita
+  os três), se manda `delta` antes do `completed` neste modelo, nem quanto o final chega depois do fim da
+  fala (a régua de 700 ms do p95 da R12). Também não foi medido o custo por minuto real no extrato. A
+  confirmação não sai com a chave do motor, como a da voz sai com a dela: apagar a chave do motor desliga
+  o pipeline (`no_transcriber_key`), mas a confirmação continua gravada.
+
+**6b: a escolha do Pipeline e da voz pela tela (DESA-474, depois do #597).** O campo Motor libera o
+Pipeline quando ele está montado (`pipelineMissing`, em `agents/[id]/pipeline-pieces.ts`): o servidor sem
+motivo em `unavailable`, uma transcrição com a chave e a confirmação da 9.1, um cérebro que conversa com a
+chave aceita, e uma voz com a chave e a confirmação. A régua parte da de `requirePipeline`, lida antes, e é
+mais dura na chave de cada peça; o preço da voz fica com o 422 do servidor. Sem isso,
+o Pipeline fica desligado, com a linha da peça que falta (`transcriber_unconfirmed`, `no_brain`,
+`no_voice`, além dos dois motivos do servidor). As peças do bloco ficam no rascunho do agente: a
+transcrição, o cérebro e o modelo com preço, e a voz, marcada em cada voz da conta confirmada ("Usar … no
+Pipeline", ao lado do Ouvir). Com o Pipeline no campo Motor, o salvar leva `pipeline` pela mesma rota e
+pela mesma validação da 5a, sem caminho novo de escrita. O `engine` de antes fica guardado, porque a API
+recusa o pipeline como `engine`. Voltar a outro motor leva `pipeline: null`. A escolha só vai no PATCH
+quando muda: salvar outro campo não regrava a escolha, nem esbarra numa confirmação apagada. Sem voz
+marcada, o salvar diz o que falta e não manda nada. As recusas do servidor (`pipeline_*`) ganharam frase
+nos três idiomas, com a peça do `detail`. A transcrição de hoje é a peça provisória (opção B da
+DESA-398): a tela diz "Transcrição provisória: a definitiva vem com a medida da transcrição." junto da
+escolha da transcrição e no campo Motor, com o Pipeline escolhido. A tela em abas (DESA-470) ainda vai
+mover o bloco: a 6b fica na tela de hoje.
+
 ## 5. O que espera a R12
 
 - **O contrato `StreamingTranscriber` na `main`: não espera.** A DESA-398 decidiu que as fatias 3 a 5
@@ -811,6 +898,9 @@ A bancada (fatia 1a) usa só texto sintético, sem dado de ninguém.
 - Se o `/chat/completions` com `stream: true` + `tools` do OpenRouter e do DeepSeek se comporta como o
   da OpenAI. A documentação da R4 foi lida para o `completeJson`, não para streaming.
 - O custo por minuto de conversa no pipeline. A fatia 6 calcula a partir do extrato real.
+- Quantas concordâncias cortam o agente hoje e quanto atraso a regra da fatia 6 acrescenta: a
+  régua de 2 em 40 e de 300 ms é proposta minha, sem medida. A bancada fala com áudio sintético; se
+  a concordância sintética se transcreve como a falada, não foi medido.
 - O país do processamento da ElevenLabs: a política diz só onde guarda (EUA). Os Termos de Serviço,
   o DPA e a página de segurança não foram lidos; algum deles pode dar prazo ou país.
 - Se as gerações do WebSocket `stream-input` aparecem no histórico da conta (seria a base da opção

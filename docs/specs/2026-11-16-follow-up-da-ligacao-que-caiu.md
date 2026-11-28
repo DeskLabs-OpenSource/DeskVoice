@@ -254,6 +254,11 @@ Por isso:
 - **Falhou a entrega** (`deliver_notification` marca falha): a rotina de entrega, para
   `audience = 'caller'` com `call_id`, abre a pendência de reserva e grava `drop_follow_up_result`
   (3.7) com `whatsapp_failed`.
+- **A lista é conferida de novo na hora do envio** (revisão fria da 0.50.0). O número pode entrar
+  na lista entre a revisão e a entrega, ou entre duas tentativas. `deliver_notification` confere
+  `do_not_call` (com o número em E.164) antes de mandar a mensagem `audience = 'caller'`. Se ele
+  está na lista, nada sai, o aviso fica `failed` sem nova tentativa e sem pendência, e a ligação
+  original grava `drop_follow_up_result` com `whatsapp_do_not_call`.
 
 ### 3.6 A IA liga de volta (fatias 3 e 4)
 
@@ -346,7 +351,7 @@ O pedido de decisão 2 (seção 7) pergunta se a doutrina deve dizer isso por es
 Na ligação original, além de `drop_follow_up` (3.3):
 
 - **`drop_follow_up_result`** (**novo** em `CALL_EVENT_KINDS`):
-  `{ action: "whatsapp_sent" | "whatsapp_failed" | "call_back_placed" | "call_back_refused" |
+  `{ action: "whatsapp_sent" | "whatsapp_failed" | "whatsapp_do_not_call" | "call_back_placed" | "call_back_refused" |
   "call_back_expired" | "call_back_answered" | "call_back_not_answered", attempt?, callId?,
   refusalCode?, costCents? }`.
 
