@@ -52,6 +52,9 @@ pode usar.
 
 ## 4. Aprovação
 
+O que esta seção descreve vale quando a ligação passar a oferecer as ferramentas. Até lá, a
+caixa fica gravada e nenhuma ligação muda.
+
 Cada ferramenta tem também a caixa **Pedir aprovação de uma pessoa antes de cada uso**,
 desmarcada de fábrica. Com ela marcada:
 
@@ -63,6 +66,8 @@ desmarcada de fábrica. Com ela marcada:
   aprovado.
 
 ## Limites
+
+Estes limites valem quando a ligação passar a oferecer as ferramentas.
 
 - **Resposta:** a resposta de uma ferramenta acima de 16 KiB é recusada. Prefira ferramentas que
   devolvem pouco texto.

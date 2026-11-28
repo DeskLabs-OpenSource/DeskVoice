@@ -1,6 +1,6 @@
 # Ferramentas de fora pela tela: servidor MCP cadastrado pelo operador (item 8 da pesquisa Vapi)
 
-- **Estado:** aprovado pelo dono em 23/11 (1A, 2A e 3A, seção 9). As fatias 8a e 8b entraram; a 8c está em construção.
+- **Estado:** aprovado pelo dono em 23/11 (1A, 2A e 3A, seção 9). As fatias 8a, 8b e 8c entraram; a 8d (o guia) está em revisão.
   O merge de cada fatia continua esperando a palavra do próprio dono.
 - **Data:** 2026-11-22
 - **Quem pediu:** o dono aprovou em 21/11 a terceira leva da pesquisa Vapi (itens 7, 8 e 10), com
@@ -315,8 +315,10 @@ teste) sai antes, sozinho.
 
 - **Servidor MCP real.** O CI usa um falso escrito por nós. Um servidor de verdade (o da própria
   Vapi, Zapier, Make, um servidor escrito com o SDK oficial) pode responder diferente: SSE que não
-  fecha, sessão exigida de outra forma, versão do protocolo recusada. Medida pedida antes da 8d:
-  ligar dois servidores reais numa instalação de teste e fazer uma ligação com cada.
+  fecha, sessão exigida de outra forma, versão do protocolo recusada. A medida com dois
+  servidores reais e uma ligação com cada **passou para a fatia que liga as MCP à ligação
+  (DESA-524)**: hoje a ligação não oferece essas ferramentas, e não há o que medir numa ligação.
+  A 8d mediu só o cliente, sem ligação, e a tabela está no PR dela (#648).
 - **O motor real aceitar os esquemas convertidos**, principalmente o Gemini.
 - **A latência** das três idas e voltas numa ligação real, e se a pessoa fica em silêncio enquanto
   isso. O `call_webhook` também não fala nada enquanto espera, e o desenho mantém isso. Se a medida
