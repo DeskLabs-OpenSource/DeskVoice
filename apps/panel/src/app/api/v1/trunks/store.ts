@@ -45,6 +45,36 @@ export const TRUNK_OVERLAP_CHECKS_PER_MINUTE = 10;
 export const trunkOverlapLimiter = createRateLimiter(TRUNK_OVERLAP_CHECKS_PER_MINUTE, 60 * 1000);
 
 /**
+ * Acima de quantas conferências de faixa no dia a organização aparece na auditoria da instalação
+ * (`trunk_overlap_many_checks`). Quem monta linhas de verdade confere poucas vezes por dia. O
+ * número está também na frase da auditoria, nos três idiomas.
+ */
+export const TRUNK_OVERLAP_CHECKS_BEFORE_AUDIT = 20;
+
+/**
+ * Quantas conferências cada organização fez no dia (UTC), contando sim e não, com ou sem
+ * confirmação. Em memória, como o limite por minuto: reiniciar o painel zera a conta. Uma chave por
+ * organização, trocada quando o dia muda.
+ */
+export function createDailyCounter() {
+  const counts = new Map<string, { day: string; count: number }>();
+  return {
+    /** Soma 1 à conta do dia de `key` e devolve a conta nova. */
+    add(key: string, now: Date): number {
+      const day = now.toISOString().slice(0, 10);
+      const current = counts.get(key);
+      const count = current?.day === day ? current.count + 1 : 1;
+      counts.set(key, { day, count });
+      return count;
+    },
+    clear(): void {
+      counts.clear();
+    },
+  };
+}
+export const trunkOverlapDailyChecks = createDailyCounter();
+
+/**
  * Antes de gravar, o aviso de faixa sobreposta (R8, fatia 10): se a linha tiraria do ar uma linha
  * por IP (desta ou de outra organização) que hoje está no ar, a gravação para e a tela pergunta.
  * A resposta não diz qual linha, de quem nem em que endereço: só que existe uma. Com a confirmação,
@@ -54,6 +84,9 @@ export const trunkOverlapLimiter = createRateLimiter(TRUNK_OVERLAP_CHECKS_PER_MI
  *
  * Cada conferência, com ou sem confirmação, gasta uma tentativa do limite da organização; acima
  * dele, 429 sem conferir e sem salvar. Na auditoria da instalação, fora da transação da linha:
+ *   - a conferência que passa de `TRUNK_OVERLAP_CHECKS_BEFORE_AUDIT` no dia grava
+ *     `trunk_overlap_many_checks`, só ela, uma vez por dia, com qualquer resposta (a resposta
+ *     "não" não grava outro evento);
  *   - a recusa grava `trunk_overlap_refused`, e o evento fica mesmo com a resposta 409;
  *   - a confirmação que tira linha do ar grava `trunk_overlap_confirmed`, antes de salvar. Por isso
  *     quem chama confere por último, depois de toda outra recusa: o evento diz que a gravação seguiu.
@@ -68,6 +101,9 @@ export async function requireOverlapConfirmed(
   const now = deps.clock.now();
   if (!trunkOverlapLimiter.take(organizationId, now)) {
     throw new ApiError(429, "too_many_attempts", "Too many attempts. Wait a minute and try again.");
+  }
+  if (trunkOverlapDailyChecks.add(organizationId, now) === TRUNK_OVERLAP_CHECKS_BEFORE_AUDIT + 1) {
+    await recordTrunkOverlap(deps.db, now, "trunk_overlap_many_checks", organizationId, session.userId);
   }
   if (!(await trunkOverlapWarning(deps.db, deps.secretKey, organizationId, candidate)).stops) return;
   if (confirmed === true) {

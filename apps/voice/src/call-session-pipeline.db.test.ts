@@ -12,7 +12,9 @@ import { createPipelineEngine, PIPELINE_FAILURE_SPEECH, PIPELINE_TRANSFER_SPEECH
 import { FixedSpeechCache, speechUsageOf } from "../../../packages/voice-engine/src/synthesis";
 import { createSimulatedSynthesizer, toneFor } from "../../../packages/voice-engine/src/synthesizers/simulated";
 import { createSimulatedTranscriber, type SimulatedTranscription, type SimulatedTranscriptScript } from "../../../packages/voice-engine/src/transcribers/simulated";
-import { brainKeySetting, brainModelsSetting, startCallSession, synthesizerKeySetting, type CallSession } from "./call-session";
+import { brainKeySetting, brainModelsSetting, FAREWELL, startCallSession, synthesizerKeySetting, type CallSession } from "./call-session";
+import { IDLE_ASK, IDLE_ASK_AGAIN, IDLE_FAREWELL, IDLE_FIRST_MS } from "./caller-idle";
+import { AFTER_CLOSE_MS, AFTER_WORDS_MS, ASK_TO_REPEAT } from "./silence-guard";
 import type { TransferOptions, TransferOutcome } from "./transport";
 import { callOf, createAgent, createCall, createOrganization, eventsOf, kindsOf, ledgerOf, manualTransport, pricedSimulatedEngine, secretKey, sessionHarness, type AgentOptions, type ManualTransport, type SessionHarness } from "./testing/db";
 import { startFakeBrain, text, tool, usage } from "./testing/fake-brain";
@@ -278,7 +280,7 @@ describe("com agents.pipeline preenchida", { timeout: 120_000 }, () => {
     expect(events.find((event) => event.kind === "engine_failed")?.payload).toEqual({ engine: "pipeline", piece: "synthesizer", pieceId: "simulated", detail: "no_credit" });
     expect(JSON.stringify(events)).not.toContain("quota_exceeded");
     // A fala de falha tocou antes do fim: quem ligou não ficou mudo.
-    expect(events.some((event) => event.kind === "transcript_agent" && event.payload.text === PIPELINE_FAILURE_SPEECH)).toBe(true);
+    expect(events.some((event) => event.kind === "transcript_agent" && event.payload.text === PIPELINE_FAILURE_SPEECH["pt-BR"])).toBe(true);
     // A recusa HTTP do cérebro é zero medido; a linha existe, e nenhuma linha sai sem medida.
     const ledger = await piecesLedger(made.callId);
     expect(ledger.filter((row) => row.engine === "brain:openai").map((row) => [Number(row.cost_microcents), row.cost_measured])[0]).toEqual([0, true]);
@@ -306,7 +308,7 @@ describe("com agents.pipeline preenchida", { timeout: 120_000 }, () => {
     await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
     made.transport.callerAudio(100);
     expect(await session.done).toMatchObject({ status: "failed", endReason: "engine_failed" });
-    const failure = toneFor([...PIPELINE_FAILURE_SPEECH].length).length;
+    const failure = toneFor([...PIPELINE_FAILURE_SPEECH["pt-BR"]].length).length;
     const at = sent.indexOf(failure);
     expect(at).toBeGreaterThanOrEqual(0);
     // Depois da fala de falha, só o sinal de falha e o desligar: nada a corta, e ela sai antes de a ligação cair.
@@ -800,25 +802,25 @@ describe("a fala de transferência pronta (fatia 3c-2)", { timeout: 120_000 }, (
     await answered(made.callId);
     await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
     // A fala de transferência foi sintetizada na abertura, antes de qualquer falha.
-    expect(voice.texts.slice(0, 3)).toEqual([PIPELINE_TRANSFER_SPEECH, "Preciso encerrar esta ligação agora. Se ainda precisar de algo, é só ligar de novo. Obrigado.", "Vou passar você para uma pessoa da equipe continuar o atendimento. Um instante, por favor."]);
+    expect(voice.texts.slice(0, 3)).toEqual([PIPELINE_TRANSFER_SPEECH["pt-BR"], "Preciso encerrar esta ligação agora. Se ainda precisar de algo, é só ligar de novo. Obrigado.", "Vou passar você para uma pessoa da equipe continuar o atendimento. Um instante, por favor."]);
     made.transport.callerAudio(100);
     const outcome = await session.done;
     expect(outcome).toMatchObject({ status: "transferred", endReason: "engine_failed" });
     expect(made.transport.transferredTo).toBe(TO);
     // A queda não pediu a fala à voz: ela já estava pronta.
-    expect(voice.texts.filter((said) => said === PIPELINE_TRANSFER_SPEECH)).toHaveLength(1);
-    expect(voice.texts).not.toContain(PIPELINE_FAILURE_SPEECH);
+    expect(voice.texts.filter((said) => said === PIPELINE_TRANSFER_SPEECH["pt-BR"])).toHaveLength(1);
+    expect(voice.texts).not.toContain(PIPELINE_FAILURE_SPEECH["pt-BR"]);
     const events = await eventsOf(app, made.callId);
     const agentSaid = events.filter((event) => event.kind === "transcript_agent").map((event) => event.payload.text);
-    expect(agentSaid).toContain(PIPELINE_TRANSFER_SPEECH);
-    expect(agentSaid).not.toContain(PIPELINE_FAILURE_SPEECH);
+    expect(agentSaid).toContain(PIPELINE_TRANSFER_SPEECH["pt-BR"]);
+    expect(agentSaid).not.toContain(PIPELINE_FAILURE_SPEECH["pt-BR"]);
     expect(events.find((event) => event.kind === "engine_failed")?.payload).toEqual({ engine: "pipeline", piece: "synthesizer", pieceId: "simulated", detail: "no_credit" });
     expect(events.find((event) => event.kind === "transfer_started")?.payload).toEqual({ to: TO, reason: "engine_failed" });
     const notice = (await notificationsOf(app, made.organizationId)).map((entry) => entry.body).join(" ");
     expect(notice).toContain("Quem ligou ouviu o aviso de que seria transferido.");
     expect(notice).toContain(`A ligação foi transferida para ${TO}.`);
     // O custo das falas prontas, a de transferência inclusive, entra no extrato da ligação, pelo preço da voz.
-    const fixedCharacters = [PIPELINE_TRANSFER_SPEECH, "Preciso encerrar esta ligação agora. Se ainda precisar de algo, é só ligar de novo. Obrigado.", "Vou passar você para uma pessoa da equipe continuar o atendimento. Um instante, por favor."].reduce((sum, said) => sum + [...said].length, 0);
+    const fixedCharacters = [PIPELINE_TRANSFER_SPEECH["pt-BR"], "Preciso encerrar esta ligação agora. Se ainda precisar de algo, é só ligar de novo. Obrigado.", "Vou passar você para uma pessoa da equipe continuar o atendimento. Um instante, por favor."].reduce((sum, said) => sum + [...said].length, 0);
     const voiceLines = (await piecesLedger(made.callId)).filter((row) => row.engine === "synthesizer:simulated");
     expect(voiceLines.map((row) => Number(row.cost_microcents))).toContain(Math.round((fixedCharacters * VOICE_PRICE.centsPerThousandCharacters * 1_000_000) / 1000));
 
@@ -831,7 +833,7 @@ describe("a fala de transferência pronta (fatia 3c-2)", { timeout: 120_000 }, (
     expect((await eventsOf(app, secondCall)).find((event) => event.kind === "call_answered")?.payload).toMatchObject({ opening: { fixedSpeech: 3, fromCache: 3 } });
     transport.callerHangup();
     await second.done;
-    expect(voice.texts.slice(speaksBefore).filter((said) => said === PIPELINE_TRANSFER_SPEECH)).toHaveLength(0);
+    expect(voice.texts.slice(speaksBefore).filter((said) => said === PIPELINE_TRANSFER_SPEECH["pt-BR"])).toHaveLength(0);
   });
 
   it("sem transfer_to_e164: nem a fala de transferência nem a despedida que promete transferência são sintetizadas, e as falas prontas não crescem", async () => {
@@ -842,8 +844,8 @@ describe("a fala de transferência pronta (fatia 3c-2)", { timeout: 120_000 }, (
     made.transport.callerHangup();
     await session.done;
     // A fala de falha e a despedida do teto que não promete transferência, e depois só a saudação (ponta 3 da 3c-2).
-    expect(voice.texts.slice(0, 2)).toEqual([PIPELINE_FAILURE_SPEECH, "Preciso encerrar esta ligação agora. Se ainda precisar de algo, é só ligar de novo. Obrigado."]);
-    expect(voice.texts).not.toContain(PIPELINE_TRANSFER_SPEECH);
+    expect(voice.texts.slice(0, 2)).toEqual([PIPELINE_FAILURE_SPEECH["pt-BR"], "Preciso encerrar esta ligação agora. Se ainda precisar de algo, é só ligar de novo. Obrigado."]);
+    expect(voice.texts).not.toContain(PIPELINE_TRANSFER_SPEECH["pt-BR"]);
     expect(voice.texts).not.toContain(CEILING_TRANSFER_FAREWELL);
     expect((await eventsOf(app, made.callId)).find((event) => event.kind === "call_answered")?.payload).toMatchObject({ opening: { fixedSpeech: 2 } });
     const fixedCharacters = voice.texts.slice(0, 2).reduce((sum, said) => sum + [...said].length, 0);
@@ -860,16 +862,16 @@ describe("as guardas da fala de transferência (pontas da 3c-2, DESA-431)", { ti
     await waitFor(() => run.opened.count === 2, "the return transcriber");
     // O trecho de volta não transfere: a abertura dele preparou a fala de falha, e não a de transferência nem a despedida que a promete.
     const speaksAfterReturn = run.voice.texts.length;
-    expect(run.voice.texts.filter((said) => said === PIPELINE_TRANSFER_SPEECH)).toHaveLength(1);
-    expect(run.voice.texts.filter((said) => said === PIPELINE_FAILURE_SPEECH)).toHaveLength(1);
+    expect(run.voice.texts.filter((said) => said === PIPELINE_TRANSFER_SPEECH["pt-BR"])).toHaveLength(1);
+    expect(run.voice.texts.filter((said) => said === PIPELINE_FAILURE_SPEECH["pt-BR"])).toHaveLength(1);
     run.voice.breakNow();
     fakeBrain?.reply([text("Posso anotar um recado."), usage(20, 5)]);
     run.transport.callerAudio(100);
     expect(await run.session.done).toMatchObject({ status: "failed", endReason: "engine_failed" });
     const events = await eventsOf(app, run.made.callId);
     const said = events.filter((event) => event.kind === "transcript_agent").map((event) => event.payload.text);
-    expect(said.at(-1)).toBe(PIPELINE_FAILURE_SPEECH);
-    expect(said.filter((text) => text === PIPELINE_TRANSFER_SPEECH)).toHaveLength(0);
+    expect(said.at(-1)).toBe(PIPELINE_FAILURE_SPEECH["pt-BR"]);
+    expect(said.filter((text) => text === PIPELINE_TRANSFER_SPEECH["pt-BR"])).toHaveLength(0);
     expect(events.filter((event) => event.kind === "transfer_started")).toHaveLength(1);
     expect(run.voice.texts.length).toBe(speaksAfterReturn);
     const notice = (await notificationsOf(app, run.made.organizationId)).map((entry) => entry.body).join(" ");
@@ -886,16 +888,16 @@ describe("as guardas da fala de transferência (pontas da 3c-2, DESA-431)", { ti
     await answered(made.callId);
     await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
     // O canal não transfere: as falas prontas são as de quem não transfere.
-    expect(voice.texts.slice(0, 2)).toEqual([PIPELINE_FAILURE_SPEECH, CEILING_FAREWELL]);
-    expect(voice.texts).not.toContain(PIPELINE_TRANSFER_SPEECH);
+    expect(voice.texts.slice(0, 2)).toEqual([PIPELINE_FAILURE_SPEECH["pt-BR"], CEILING_FAREWELL]);
+    expect(voice.texts).not.toContain(PIPELINE_TRANSFER_SPEECH["pt-BR"]);
     expect(voice.texts).not.toContain(CEILING_TRANSFER_FAREWELL);
     voice.breakNow();
     made.transport.callerAudio(100);
     expect(await session.done).toMatchObject({ status: "failed", endReason: "engine_failed" });
     expect(made.transport.transferredTo).toBeNull();
     const said = (await eventsOf(app, made.callId)).filter((event) => event.kind === "transcript_agent").map((event) => event.payload.text);
-    expect(said.at(-1)).toBe(PIPELINE_FAILURE_SPEECH);
-    expect(said).not.toContain(PIPELINE_TRANSFER_SPEECH);
+    expect(said.at(-1)).toBe(PIPELINE_FAILURE_SPEECH["pt-BR"]);
+    expect(said).not.toContain(PIPELINE_TRANSFER_SPEECH["pt-BR"]);
     const notice = (await notificationsOf(app, made.organizationId)).map((entry) => entry.body).join(" ");
     expect(notice).toContain("Quem ligou ouviu o aviso de falha.");
     expect(notice).toContain("este canal não tem como transferir");
@@ -1042,7 +1044,7 @@ describe("a corrida do fim de chamada na transferência com volta (fatia 3c-2)",
     expect(kinds).not.toContain("pipeline_turn_latency");
     expect(run.opened.count).toBe(2);
     // A fala de falha que a abertura da volta sintetizou (a primeira perna tinha a de transferência) entra no extrato.
-    expect(late.map((row) => Number(row.cost_microcents))).toEqual([[...PIPELINE_FAILURE_SPEECH].length * VOICE_PRICE.centsPerThousandCharacters * 1000]);
+    expect(late.map((row) => Number(row.cost_microcents))).toEqual([[...PIPELINE_FAILURE_SPEECH["pt-BR"]].length * VOICE_PRICE.centsPerThousandCharacters * 1000]);
   });
 
   it("o fim logo depois de a abertura do trecho de volta terminar, antes de o trecho entrar na linha: a sessão nova fecha, e nada é gravado depois do fim", async () => {
@@ -1054,7 +1056,7 @@ describe("a corrida do fim de chamada na transferência com volta (fatia 3c-2)",
     expect(run.opened.count).toBe(2);
     // A fala de falha que a abertura da volta sintetizou entra no extrato, antes ou depois do fim.
     const voiceLines = (await piecesLedger(run.made.callId)).filter((row) => row.engine === "synthesizer:simulated");
-    expect(voiceLines.map((row) => Number(row.cost_microcents))).toContain([...PIPELINE_FAILURE_SPEECH].length * VOICE_PRICE.centsPerThousandCharacters * 1000);
+    expect(voiceLines.map((row) => Number(row.cost_microcents))).toContain([...PIPELINE_FAILURE_SPEECH["pt-BR"]].length * VOICE_PRICE.centsPerThousandCharacters * 1000);
   });
 
   it("o fim com o trecho de volta já na linha, a saudação tocando: as peças fecham, a fala aberta é cancelada, e nada é gravado depois do fim", async () => {
@@ -1274,5 +1276,124 @@ describe("as notas da 5b-2 (fatia 5c)", { timeout: 120_000 }, () => {
     expect(await second.done).toMatchObject({ status: "transferred" });
     await settle();
     expect(fakeBrain?.fetched()).toBe(1);
+  });
+});
+
+// ---- DESA-517: as falas fixas da sessão no idioma do agente, no motor que entrega o texto à voz como veio ----
+
+describe("as falas fixas da sessão no idioma do agente pipeline (DESA-517)", { timeout: 120_000 }, () => {
+  /** Dispara o único prazo da guarda guardado: pelo menos `atLeast` ms, contado do fim do áudio que tocou (o da duração máxima, de uma hora, fica). */
+  const fireTheOne = (made: Scene, atLeast: number): void => {
+    const due = made.harness.timers.held().filter((delay) => delay >= atLeast && delay < 100_000);
+    expect(due).toHaveLength(1);
+    const delay = due[0] ?? 0;
+    made.harness.clock.advance(delay);
+    expect(made.harness.timers.fire(delay)).toBe(1);
+  };
+
+  for (const [language, spoken] of [["en-US", "en"], ["es-MX", "es"]] as const) {
+    it(`${language}: calado, a voz recebe o "ainda está aí?", o segundo lembrete e a despedida em ${spoken}`, async () => {
+      const voice = pricedVoice();
+      const made = await scene(`pipeline-idle-${spoken}`, { engine: "openai-realtime", greeting: "Hello.", language, maxCallSeconds: 3600 }, { pipeline: PIPELINE, synthesizer: voice.synthesizer });
+      const session = made.start();
+      await answered(made.callId);
+      // A saudação vem depois do aviso de gravação, que é texto do operador e fica fora desta tarefa.
+      await waitFor(() => voice.texts.some((said) => said.endsWith("Hello.")), "the greeting");
+      await waitFor(() => made.harness.timers.held().some((delay) => delay >= IDLE_FIRST_MS && delay < 100_000), "the idle guard to arm");
+      fireTheOne(made, IDLE_FIRST_MS);
+      await waitFor(() => voice.texts.includes(IDLE_ASK[spoken]), "the first reminder");
+      await waitFor(() => made.harness.timers.held().some((delay) => delay >= 8_000 && delay < 100_000), "the second step");
+      fireTheOne(made, 8_000);
+      await waitFor(() => voice.texts.includes(IDLE_ASK_AGAIN[spoken]), "the second reminder");
+      await waitFor(() => made.harness.timers.held().some((delay) => delay >= 8_000 && delay < 100_000), "the last step");
+      fireTheOne(made, 8_000);
+      await waitFor(() => voice.texts.includes(IDLE_FAREWELL[spoken]), "the farewell");
+      expect(voice.texts).not.toContain(IDLE_ASK["pt-BR"]);
+      made.harness.timers.fire(6000);
+      expect(await session.done).toMatchObject({ endReason: "caller_silent" });
+    });
+
+    it(`${language}: a despedida do tempo máximo chega à voz em ${spoken}`, async () => {
+      const voice = pricedVoice();
+      const made = await scene(`pipeline-max-duration-${spoken}`, { engine: "openai-realtime", language, maxCallSeconds: 45 }, { pipeline: PIPELINE, synthesizer: voice.synthesizer });
+      const session = made.start();
+      await answered(made.callId);
+      made.harness.clock.advance(45_000);
+      expect(made.harness.timers.fire(45_000)).toBe(1);
+      await waitFor(() => voice.texts.includes(FAREWELL.maxDuration[spoken]), "the farewell");
+      made.harness.timers.fire(6000);
+      expect(await session.done).toMatchObject({ endReason: "max_duration" });
+    });
+  }
+
+  it("en-US: quem ligou fala e o agente não responde: o pedido para repetir chega à voz em inglês", async () => {
+    const voice = pricedVoice();
+    // Só um parcial: o fim do turno é a guarda que dá, e o cérebro responde sem texto (o agente fica calado).
+    const ear = pricedTranscriber([{ afterAudioMs: 100, text: "I want to", final: false }]);
+    const made = await scene("pipeline-ask-to-repeat-en", { engine: "openai-realtime", greeting: "Hello.", language: "en-US", maxCallSeconds: 3600 }, { pipeline: PIPELINE, transcriber: ear.transcriber, synthesizer: voice.synthesizer });
+    fakeBrain?.reply([usage(20, 0)]);
+    const session = made.start();
+    await answered(made.callId);
+    await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+    // A guarda não ouve quem ligou enquanto a saudação toca: o relógio passa do fim dela (o áudio dela armou o "ainda está aí?").
+    await waitFor(() => made.harness.timers.held().some((delay) => delay >= IDLE_FIRST_MS && delay < 100_000), "the greeting audio");
+    made.harness.clock.advance(IDLE_FIRST_MS);
+    made.transport.callerAudio(100);
+    await waitFor(() => made.harness.timers.held().includes(AFTER_WORDS_MS), "the silence guard to arm");
+    made.harness.clock.advance(AFTER_WORDS_MS);
+    expect(made.harness.timers.fire(AFTER_WORDS_MS)).toBe(1);
+    for (let round = 0; round < 2 && !voice.texts.includes(ASK_TO_REPEAT.en); round++) {
+      await waitFor(() => made.harness.timers.held().includes(AFTER_CLOSE_MS), "the guard to wait for the answer");
+      made.harness.clock.advance(AFTER_CLOSE_MS);
+      made.harness.timers.fire(AFTER_CLOSE_MS);
+      await settle();
+    }
+    await waitFor(() => voice.texts.includes(ASK_TO_REPEAT.en), "the request to repeat");
+    expect(voice.texts).not.toContain(ASK_TO_REPEAT["pt-BR"]);
+    made.transport.callerHangup();
+    await session.done;
+  });
+
+  it("en-US no teto: a despedida pronta da abertura é a inglesa, e é ela que toca, sem fala nova", async () => {
+    const voice = pricedVoice();
+    const ear = pricedTranscriber([{ afterAudioMs: 200, text: "I want to leave a message.", final: true }]);
+    const made = await scene("pipeline-ceiling-en", { engine: "openai-realtime", greeting: "Hello.", language: "en-US", costCeilingCents: 50 }, { pipeline: PIPELINE, transcriber: ear.transcriber, synthesizer: voice.synthesizer });
+    fakeBrain?.reply([text("Done."), usage(1_000_000, 10)]);
+    const session = made.start();
+    await answered(made.callId);
+    // As falas prontas da abertura, já no idioma do agente.
+    expect(voice.texts.slice(0, 2)).toEqual([PIPELINE_FAILURE_SPEECH.en, FAREWELL.costCeiling.en]);
+    await waitFor(() => ear.sessions.length === 1, "the transcriber to open");
+    made.transport.callerAudio(200);
+    await waitFor(async () => (await kindsOf(app, made.callId)).includes("cost_ceiling_reached"), "the cost ceiling");
+    const speaksAtCeiling = voice.speaks();
+    await waitFor(async () => (await eventsOf(app, made.callId)).some((event) => event.kind === "transcript_agent" && event.payload.text === FAREWELL.costCeiling.en), "the farewell");
+    made.harness.timers.fire(6000);
+    expect(await session.done).toMatchObject({ status: "completed", endReason: "cost_ceiling" });
+    expect(voice.speaks()).toBe(speaksAtCeiling);
+    expect(voice.texts).not.toContain(FAREWELL.costCeiling["pt-BR"]);
+  });
+
+  it("es-MX com transferência: a fala de transferência e as duas despedidas ficam prontas em espanhol", async () => {
+    const voice = pricedVoice();
+    const made = await scene("pipeline-transfer-es", { engine: "openai-realtime", greeting: "Hola.", language: "es-MX", transferTo: "+5531988887777" }, { pipeline: PIPELINE, synthesizer: voice.synthesizer });
+    const session = made.start();
+    await answered(made.callId);
+    expect(voice.texts.slice(0, 3)).toEqual([PIPELINE_TRANSFER_SPEECH.es, FAREWELL.costCeiling.es, FAREWELL.costCeilingTransfer.es]);
+    made.transport.callerHangup();
+    await session.done;
+  });
+
+  it("pt-BR e um idioma que as falas não têm (fr) dão as despedidas de sempre, byte a byte", async () => {
+    expect(FAREWELL.maxDuration["pt-BR"]).toBe("Esta ligação chegou ao tempo máximo e vou precisar encerrar. Se ainda precisar de algo, é só ligar de novo. Obrigado.");
+    expect(FAREWELL.costCeiling["pt-BR"]).toBe(CEILING_FAREWELL);
+    expect(FAREWELL.costCeilingTransfer["pt-BR"]).toBe(CEILING_TRANSFER_FAREWELL);
+    const voice = pricedVoice();
+    const made = await scene("pipeline-fr", { engine: "openai-realtime", language: "fr-FR" }, { pipeline: PIPELINE, synthesizer: voice.synthesizer });
+    const session = made.start();
+    await answered(made.callId);
+    expect(voice.texts.slice(0, 2)).toEqual([PIPELINE_FAILURE_SPEECH["pt-BR"], CEILING_FAREWELL]);
+    made.transport.callerHangup();
+    await session.done;
   });
 });

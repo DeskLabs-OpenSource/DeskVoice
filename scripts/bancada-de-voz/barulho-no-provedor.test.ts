@@ -142,7 +142,7 @@ describe("medirResposta", () => {
     sessao.aoFalar = () => relogio.agendar(() => sessao.emitir("audio", audioDoAgente(2000)), 200);
     const r = await medirResposta(sessao, escuta, relogio, frase(1000, 3000, 24000));
 
-    expect(sessao.falas).toEqual([ASK_TO_REPEAT]);
+    expect(sessao.falas).toEqual([ASK_TO_REPEAT["pt-BR"]]);
     expect(r).toMatchObject({ respostaMs: AFTER_WORDS_MS + AFTER_CLOSE_MS + 200, guardaFechou: true, guardaPediuRepetir: true });
   });
 

@@ -1,4 +1,4 @@
-import type { Clock } from "@deskvoice/core";
+import { spokenLanguageOf, type Clock, type SpokenLanguage } from "@deskvoice/core";
 import type { Schedule } from "./transport";
 
 /**
@@ -20,8 +20,15 @@ export const WITHOUT_WORDS_MS = 8000;
 export const AFTER_CLOSE_MS = 4000;
 // Os prazos acima são o ponto de partida do desenho, sem medida: a fatia 5 mede e ajusta.
 
-/** O pedido curto para repetir. O motor fala no idioma do agente. */
-export const ASK_TO_REPEAT = "Desculpe, a linha está com bastante barulho. Pode repetir, por favor?";
+/**
+ * O pedido curto para repetir, no idioma do agente do trecho (`language` das dependências, escolhido
+ * por `spokenLanguageOf`): o motor pipeline entrega o texto à voz como veio (DESA-517).
+ */
+export const ASK_TO_REPEAT: Readonly<Record<SpokenLanguage, string>> = {
+  "pt-BR": "Desculpe, a linha está com bastante barulho. Pode repetir, por favor?",
+  en: "Sorry, there's a lot of noise on the line. Could you repeat that, please?",
+  es: "Disculpe, hay mucho ruido en la línea. ¿Puede repetir, por favor?",
+};
 
 /** O payload de `caller_unanswered`. */
 export interface CallerUnanswered {
@@ -38,6 +45,8 @@ export interface CallerUnanswered {
 export interface SilenceGuardDeps {
   clock: Clock;
   schedule: Schedule;
+  /** O idioma do agente do trecho, como gravado (`en-US`): o pedido para repetir sai nele. */
+  language: string;
   closeCallerTurn(): void;
   say(text: string): void;
   /** O provedor já prepara a resposta, que ainda não chegou em áudio (`VoiceSession.answering`). */
@@ -86,6 +95,7 @@ type Phase =
 
 export function createSilenceGuard(deps: SilenceGuardDeps): SilenceGuard {
   const { clock, schedule } = deps;
+  const askToRepeat = ASK_TO_REPEAT[spokenLanguageOf(deps.language)];
   let phase: Phase = { kind: "idle" };
   let stopped = false;
   let toolsRunning = 0;
@@ -126,7 +136,7 @@ export function createSilenceGuard(deps: SilenceGuardDeps): SilenceGuard {
         }
         // Depois de pedir para repetir, não insiste: só um sinal novo de quem ligou arma de novo.
         disarm();
-        deps.say(ASK_TO_REPEAT);
+        deps.say(askToRepeat);
         deps.acted(report("asked_to_repeat"));
       };
       arm(AFTER_CLOSE_MS, ask);
