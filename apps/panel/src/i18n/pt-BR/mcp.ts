@@ -2,7 +2,7 @@
 // agente (item 8, fatia 8b).
 const mcp = {
   title: "Servidores de ferramentas (MCP)",
-  lead: "Um servidor MCP oferece ferramentas que os agentes podem usar durante a ligação. O DeskVoice guarda um retrato do que o servidor oferece, e só vale o que você marcar aqui. Ferramenta que muda no servidor volta desmarcada.",
+  lead: "Um servidor MCP oferece ferramentas para os agentes. Por enquanto, a ligação ainda não as oferece ao agente: o que você marca aqui e na tela do agente fica gravado para quando ela oferecer. O DeskVoice guarda um retrato do que o servidor oferece, e só vale o que você marcar aqui. Ferramenta que muda no servidor volta desmarcada.",
   empty: "Nenhum servidor cadastrado.",
   add: "Cadastrar servidor",
   slug: "Identificador",
@@ -25,6 +25,7 @@ const mcp = {
   toolsNone: "O servidor não oferece ferramentas.",
   allowed: "Liberar para os agentes",
   writes: "Escreve (muda algo fora do DeskVoice)",
+  needsApproval: "Pedir aprovação de uma pessoa antes de cada uso (quem liga espera na linha até 2 minutos)",
   readOnlyHint: "O servidor diz que esta ferramenta só lê. É só uma dica: quem decide é você.",
   unsupported: "O DeskVoice não entende os campos desta ferramenta, e ela não pode ser liberada.",
   omitted: "O servidor oferece mais {count} ferramentas, que não entraram no retrato.",

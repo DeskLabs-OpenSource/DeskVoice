@@ -2,7 +2,7 @@ import type { McpDictionary } from "../pt-BR/mcp";
 
 const mcp: McpDictionary = {
   title: "Tool servers (MCP)",
-  lead: "An MCP server offers tools that agents can use during a call. DeskVoice keeps a snapshot of what the server offers, and only what you tick here counts. A tool that changes on the server comes back unticked.",
+  lead: "An MCP server offers tools for the agents. For now, calls do not offer them to the agent yet: what you tick here and on the agent screen is saved for when they do. DeskVoice keeps a snapshot of what the server offers, and only what you tick here counts. A tool that changes on the server comes back unticked.",
   empty: "No server registered.",
   add: "Register server",
   slug: "Identifier",
@@ -25,6 +25,7 @@ const mcp: McpDictionary = {
   toolsNone: "The server offers no tools.",
   allowed: "Allow for agents",
   writes: "Writes (changes something outside DeskVoice)",
+  needsApproval: "Ask a person to approve before each use (the caller waits on the line for up to 2 minutes)",
   readOnlyHint: "The server says this tool only reads. It is only a hint: you decide.",
   unsupported: "DeskVoice does not understand the fields of this tool, and it cannot be allowed.",
   omitted: "The server offers {count} more tools, which did not enter the snapshot.",
