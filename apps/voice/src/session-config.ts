@@ -6,7 +6,7 @@
 // Este arquivo não roda ferramenta e não importa quem roda (`runTool`): o executor do teste o
 // importa, e a cerca `fences/agent-test-runs-no-tool.test.ts` confere o executor.
 import { rememberedBlock, type RememberedItem } from "@deskvoice/core";
-import { TRANSFER_TO_AGENT, toSpec, type HandoffTarget, type Tool } from "@deskvoice/tools";
+import { mcpToolFingerprint, mcpTools, TRANSFER_TO_AGENT, toSpec, type HandoffTarget, type RegisteredMcpServer, type Tool } from "@deskvoice/tools";
 import { SIMULATED_PREFIX, type VoiceSessionConfig } from "@deskvoice/voice-engine";
 import type { Logger } from "./log";
 
@@ -107,14 +107,42 @@ export interface EnabledToolsInput {
   canTransfer: boolean;
   /** A ligação já voltou de uma transferência sem atendimento. */
   returned: boolean;
+  /**
+   * Os servidores MCP da organização da ligação (`loadMcpServers`, lido pelo `OrgQuery` dela).
+   * Ausente, nenhum: a sessão recebe o mesmo de antes.
+   */
+  mcpServers?: readonly RegisteredMcpServer[];
   log: Logger;
 }
 
+/**
+ * As ferramentas MCP que podem ir ao motor, pelo nome `<servidor>__<ferramenta>`: só as do retrato
+ * marcadas pelo operador (`allowed`), dentro do subconjunto (`supported`) e cujo retrato ainda é o
+ * que foi marcado. Se o nome, a descrição ou o esquema gravados já não dão a impressão digital
+ * gravada, o retrato mudou depois da marca, e a ferramenta fica fora até o operador marcar de novo.
+ */
+function markedMcpTools(servers: readonly RegisteredMcpServer[], log: Logger): Map<string, Tool> {
+  const tools = new Map<string, Tool>();
+  for (const server of servers) {
+    const unchanged = server.tools.filter((snapshot) => {
+      if (!snapshot.allowed || !snapshot.supported) return false;
+      if (mcpToolFingerprint(snapshot) === snapshot.fingerprint) return true;
+      log("error", "MCP tool changed since the operator marked it; ignoring it", { server: server.slug, tool: snapshot.name });
+      return false;
+    });
+    for (const tool of mcpTools({ ...server, tools: unchanged })) tools.set(tool.name, tool);
+  }
+  return tools;
+}
+
 /** As ferramentas que o motor recebe para o agente. */
-export function enabledToolsFor({ installed, names, targets, canTransfer, returned, log }: EnabledToolsInput): Map<string, Tool> {
+export function enabledToolsFor({ installed, names, targets, canTransfer, returned, mcpServers = [], log }: EnabledToolsInput): Map<string, Tool> {
   const enabled = new Map<string, Tool>();
+  // As MCP entram como as da pasta: o nome precisa estar marcado no agente (`agents.tools`) e no
+  // servidor. A da pasta vem primeiro; a cerca do `__` garante que nenhuma da pasta tem esse nome.
+  const mcp = markedMcpTools(mcpServers, log);
   for (const name of names) {
-    const tool = installed.get(name);
+    const tool = installed.get(name) ?? mcp.get(name);
     // Sem transferência no canal (ligação pelo WhatsApp), o motor nem a vê: a descrição manda
     // anunciar a transferência antes de chamar, e quem ligou ouviria "vou transferir" e o recuo.
     // Depois de uma transferência que voltou, também não: o agente não transfere de novo, em laço.
