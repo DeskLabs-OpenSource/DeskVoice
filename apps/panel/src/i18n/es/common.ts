@@ -187,6 +187,7 @@ const common: CommonDictionary = {
     transcription_has_text: "Esta llamada ya tiene transcripción. Actualice la página.",
     transcription_engine_unsupported: "El motor de voz de esta llamada no transcribe grabaciones. Solo los motores de OpenAI y de Google lo hacen.",
     transcription_cost_ceiling: "Esta llamada ya alcanzó el tope de costo del agente. La transcripción no se hizo y no se cobró nada.",
+    spend_cap_reached: "Esta organización llegó al tope de gasto del mes. La transcripción no se hizo y no se cobró nada. Quien administra la instalación puede cambiar el tope.",
     transcription_no_recording: "Esta llamada no tiene grabación para transcribir.",
     transcription_unreadable: "La grabación de esta llamada no está en el formato que escribe el grabador, con un canal para cada lado. No se envió nada al proveedor.",
     transcription_too_long: "La grabación es más larga de lo que el proveedor acepta en una solicitud. No se envió ni se cobró nada.",

@@ -234,6 +234,7 @@ const timeline: TimelineDictionary = {
       provider_error: "El proveedor respondió con un error de su lado.",
       unexpected_response: "El proveedor respondió algo fuera del formato pedido. Lo que cobró entró en el costo de la llamada.",
       transcription_too_long: "La grabación es más larga de lo que el proveedor acepta en una solicitud. No se envió ni se cobró nada.",
+      spend_cap_reached: "La organización había llegado al tope de gasto del mes. No se envió ni se cobró nada. Quien administra la instalación puede cambiar el tope.",
     } as Record<string, string>,
     transcription_failed_unknown: "El proveedor no transcribió la grabación. El motivo está abajo y en el registro del proceso del panel.",
     transcript_from_recording: "Transcrito de la grabación. El texto reúne todo lo que dijo este lado, sin el orden de las intervenciones.",
@@ -267,6 +268,7 @@ const timeline: TimelineDictionary = {
       brain_unavailable: "El cerebro elegido para leer las llamadas no está disponible, o el modelo salió de su lista guardada. No se envió nada, ni siquiera al motor de voz. Revisa la elección en la sección del análisis, en Configuración.",
       brain_no_key: "El cerebro elegido para leer las llamadas no tiene clave guardada. No se envió nada, ni siquiera al motor de voz. Guarda la clave en Configuración → Cerebros.",
       brain_unmeasured_without_ceiling: "El precio del modelo elegido ({model}) no se conoce, y el agente no tiene tope de costo. Sin tope, un costo que no se mide no tendría límite, y no se envió nada. Activa el tope de costo en el agente o elige un modelo con precio.",
+      spend_cap_reached: "La organización había llegado al tope de gasto del mes, y no se envió nada al proveedor. Quien administra la instalación puede cambiar el tope.",
     },
     outcome_not_classified_status: "Respuesta del proveedor: HTTP {status}",
     call_analyzed: "Llamada analizada: nota {score} de 10",
@@ -292,6 +294,7 @@ const timeline: TimelineDictionary = {
       brain_unavailable: "el cerebro elegido no está disponible, o el modelo salió de su lista guardada",
       brain_no_key: "el cerebro elegido no tiene clave guardada",
       brain_unmeasured_without_ceiling: "el precio del modelo elegido ({model}) no se conoce, y el agente no tiene tope de costo",
+      spend_cap_reached: "la organización había llegado al tope de gasto del mes, y no se envió nada al proveedor",
     },
     analyst_read: {
       read: "El analista leyó la conversación.",
@@ -367,6 +370,7 @@ const timeline: TimelineDictionary = {
     drop_follow_up_result: {
       whatsapp_sent: "El mensaje de WhatsApp a quien llamó salió.",
       whatsapp_failed: "El mensaje de WhatsApp a quien llamó no salió.",
+      whatsapp_do_not_call: "El mensaje de WhatsApp a quien llamó no salió: el número entró en la lista de no llamar antes del envío.",
       call_back_placed: "La devolución de la llamada salió (intento {attempt}).",
       call_back_refused: "La devolución no salió (intento {attempt}): {reason}.",
       call_back_expired: "La devolución no salió (intento {attempt}): el proceso de voz no marcó a tiempo.",

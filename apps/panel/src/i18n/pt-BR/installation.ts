@@ -65,7 +65,7 @@ const installation = {
     limitsOutboundReturnsOff: "A saída desta organização volta como ela deixou: desligada.",
     limitsSpendCap: "Teto de gasto do mês, em dólares",
     limitsSpendCapSpent: "Gasto neste mês: {spent}.",
-    limitsSpendCapApprox: "Aproximado: inclui custo estimado e não inclui o que não pôde ser medido. No teto, toda ligação nova é recusada (a que está em andamento continua).",
+    limitsSpendCapApprox: "Aproximado: inclui custo estimado e não inclui o que não pôde ser medido. No teto, toda ligação nova é recusada (a que está em andamento continua), e o desfecho, a análise e a transcrição da gravação deixam de ser pedidos ao provedor.",
     limitsSpendCapInvalid: "O teto de gasto do mês precisa ser um valor em dólares, como 50 ou 49.90, ou ficar vazio.",
     defaultsTitle: "Padrões para organizações novas",
     defaultsLead: "Os limites, o fuso e o idioma com que cada organização nova nasce. Vale só para as organizações criadas daqui em diante: as que já existem continuam como estão.",

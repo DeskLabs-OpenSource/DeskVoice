@@ -6,7 +6,7 @@ import { wahaSessionName } from "@deskvoice/tools";
 import { afterAll, describe, expect, it } from "vitest";
 import { createOrganization, createUser, depsFor, eventsOf, fakeFetch, fakeLookup, openTestDbs, putSetting, putWhatsAppConnector, t0, task, tasksOf } from "../../test/helpers";
 import { startFakeWaha } from "../../../../packages/tools/test/fake-waha";
-import deliverNotification, { CALLER_NUMBER_MARK } from "./deliver_notification";
+import deliverNotification, { CALLER_NUMBER_MARK, ON_DO_NOT_CALL } from "./deliver_notification";
 import reviewCallRoutine, {
   CALLER_MESSAGE_FAILED_DETAILS,
   ORG_LIMIT_DETAILS,
@@ -1084,6 +1084,60 @@ describe("review_call: o modo whatsapp (fatia 2)", () => {
       await expect(deliver(s.org, s.notice, down, MAX_TASK_ATTEMPTS)).rejects.toThrow("HTTP 502");
       expect(await results(s.callId)).toHaveLength(1);
       expect(await followUpsOf(s.org)).toHaveLength(1);
+    });
+
+    it("o número que entrou na lista de não ligar depois da revisão não recebe: nada sai, a ligação grava whatsapp_do_not_call, sem pendência e sem nova tentativa", async () => {
+      const s = await queuedScene("wa deliver dnc");
+      // A pessoa pediu para não ser procurada entre a revisão (que enfileirou) e a entrega. O número da
+      // lista é gravado como o painel grava, em E.164.
+      await withSystem(app, (q) => q.exec("insert into do_not_call (organization_id, e164, reason) values ($1, $2, 'Pediu para não ser procurado')", [s.org, CALLER]));
+      const net = fakeFetch();
+      await deliverNotification.run(task(s.org, "deliver_notification", { notificationId: s.notice }), depsFor(app, { fetch: net.fetch, lookup: fakeLookup() }));
+      expect(net.requests).toEqual([]);
+      expect(await results(s.callId)).toEqual([{ action: "whatsapp_do_not_call" }]);
+      expect(await followUpsOf(s.org)).toEqual([]);
+      const row = await withSystem(app, (q) => q.one<{ status: string; error: string | null }>("select status, error from notifications where id = $1", [s.notice]));
+      expect(row).toEqual({ status: "failed", error: ON_DO_NOT_CALL });
+      expect(ON_DO_NOT_CALL).not.toContain(CALLER.replace(/\D/g, ""));
+      // A fila devolve a tarefa (ou ela roda de novo): continua sem sair, sem gravar de novo.
+      await deliverNotification.run({ ...task(s.org, "deliver_notification", { notificationId: s.notice }), attempts: MAX_TASK_ATTEMPTS }, depsFor(app, { fetch: net.fetch, lookup: fakeLookup() }));
+      expect(net.requests).toEqual([]);
+      expect(await results(s.callId)).toHaveLength(1);
+      expect(await followUpsOf(s.org)).toEqual([]);
+    });
+
+    it("o número na lista entre uma tentativa que falhou e a seguinte também não recebe", async () => {
+      const s = await queuedScene("wa deliver dnc retry");
+      await expect(deliver(s.org, s.notice, down, 1)).rejects.toThrow("HTTP 502");
+      await withSystem(app, (q) => q.exec("insert into do_not_call (organization_id, e164) values ($1, $2)", [s.org, CALLER]));
+      const net = fakeFetch();
+      await deliverNotification.run({ ...task(s.org, "deliver_notification", { notificationId: s.notice }), attempts: 2 }, depsFor(app, { fetch: net.fetch, lookup: fakeLookup() }));
+      expect(net.requests).toEqual([]);
+      expect(await results(s.callId)).toEqual([{ action: "whatsapp_do_not_call" }]);
+      expect(await followUpsOf(s.org)).toEqual([]);
+    });
+
+    it("a conferência compara em E.164: o número guardado sem o + (só os dígitos) casa com o da lista", async () => {
+      const s = await queuedScene("wa deliver dnc digits");
+      await withSystem(app, (q) => q.exec("update notifications set target = $2 where id = $1", [s.notice, CALLER.replace(/\D/g, "")]));
+      await withSystem(app, (q) => q.exec("insert into do_not_call (organization_id, e164) values ($1, $2)", [s.org, CALLER]));
+      const net = fakeFetch();
+      await deliverNotification.run(task(s.org, "deliver_notification", { notificationId: s.notice }), depsFor(app, { fetch: net.fetch, lookup: fakeLookup() }));
+      expect(net.requests).toEqual([]);
+      expect(await results(s.callId)).toEqual([{ action: "whatsapp_do_not_call" }]);
+    });
+
+    it("o aviso à equipe não passa pela lista de não ligar: a lista é de quem é procurado, não de quem trabalha", async () => {
+      const s = await queuedScene("wa deliver dnc team");
+      const staff = "+5531977776666";
+      await withSystem(app, (q) => q.exec("insert into do_not_call (organization_id, e164) values ($1, $2)", [s.org, staff]));
+      const team = await withSystem(app, (q) =>
+        q.one<{ id: string }>("insert into notifications (organization_id, call_id, channel, target, body) values ($1, $2, 'whatsapp', $3, 'Aviso') returning id", [s.org, s.callId, staff]),
+      );
+      const net = fakeFetch();
+      await deliverNotification.run(task(s.org, "deliver_notification", { notificationId: team?.id }), depsFor(app, { fetch: net.fetch, lookup: fakeLookup() }));
+      expect(net.requests.map((request) => (request.body as { to: string }).to)).toEqual([staff]);
+      expect(await results(s.callId)).toEqual([]);
     });
 
     it("a tentativa que falha e depois sai grava só whatsapp_sent, sem pendência", async () => {

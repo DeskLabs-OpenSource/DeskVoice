@@ -50,10 +50,10 @@ equal "pasta com a senha da ARI fechada para outros usuários" 700 "$(mode_of "$
 # que ele monta precisa sair legível, qualquer que seja o umask. Achado na primeira instalação
 # real: o plano de discagem e a ARI não carregaram e a checagem dizia "ok".
 ( umask 077
-  chmod 600 "$D/asterisk/extensions.conf" "$D/asterisk/http.conf" "$D/asterisk/modules.conf"
+  chmod 600 "$D/asterisk/extensions.conf" "$D/asterisk/http.conf" "$D/asterisk/modules.conf" "$D/asterisk/logger.conf"
   rm -rf "$G"
   source "$KIT/_common.sh"; render_asterisk_config )
-for f in extensions.conf http.conf ari.conf rtp.conf pjsip.conf modules.conf; do
+for f in extensions.conf http.conf ari.conf rtp.conf pjsip.conf modules.conf logger.conf; do
   check "umask 077: $f existe na pasta montada" test -s "$G/$f"
   equal "umask 077: $f legível pelo Asterisk" 644 "$(mode_of "$G/$f")"
 done
@@ -76,6 +76,12 @@ for m in res_pjsip res_pjsip_pubsub chan_pjsip res_pjsip_session res_pjsip_sdp_r
 done
 refuse "o modules.conf não exige o res_pjsip_nat (sem ele o Asterisk não subiria)" grep -Eq '^[[:space:]]*require[^=]*=>?[[:space:]]*res_pjsip_nat' "$G/modules.conf"
 check "o modules.conf mantém o autoload da imagem" grep -qx 'autoload=yes' "$G/modules.conf"
+# O log do Asterisk tem teto: vai só para o console (a saída do contêiner, que o Docker limita), e
+# nunca para um arquivo dentro do contêiner, que crescia sem limite (20 GB numa instalação).
+check "o logger.conf montado é o do repositório" cmp -s "$REPO/deploy/asterisk/logger.conf" "$G/logger.conf"
+contains "o compose monta o logger.conf gerado" "$(grep -E '^\s+- \./asterisk/' "$D/docker-compose.yml")" "./asterisk/generated/logger.conf:/etc/asterisk/logger.conf:ro"
+equal "o logger.conf só escreve no console" "console => notice,warning,error" "$(grep -Ev '^[[:space:]]*(;|\[|$)' "$G/logger.conf")"
+equal "o logger.conf mudado é recarregado pelo módulo logger, sem reiniciar" logger "$(asterisk_module_of logger.conf)"
 lacks "o compose não monta mais arquivo direto do repositório" "$(grep -E '^\s+- \./asterisk/' "$D/docker-compose.yml")" "./asterisk/extensions.conf"
 # Sem o modelo do modules.conf, só a volta da atualização segue (a versão anterior pode ser de antes
 # dele). Na instalação, e em toda chamada sem --rollback, é repositório incompleto, como os outros.
@@ -86,6 +92,13 @@ check "... e não apaga o modules.conf já gerado" test -s "$G/modules.conf"
 ( source "$KIT/_common.sh"; render_asterisk_config --rollback ) >/dev/null 2>&1; equal "sem o modelo do modules.conf, a volta segue" 0 "$?"
 refuse "... e o modules.conf gerado sai (o Compose da versão anterior não o monta)" test -e "$G/modules.conf"
 mv "$D/asterisk/modules.conf.fora" "$D/asterisk/modules.conf"
+# O mesmo vale para o logger.conf: a versão anterior pode ser de antes dele.
+mv "$D/asterisk/logger.conf" "$D/asterisk/logger.conf.fora"
+( source "$KIT/_common.sh"; render_asterisk_config ) >/dev/null 2>&1; equal "sem o modelo do logger.conf, a instalação falha" 1 "$?"
+( source "$KIT/_common.sh"; render_asterisk_config --rollback ) >/dev/null 2>&1; equal "sem o modelo do logger.conf, a volta segue" 0 "$?"
+refuse "... e o logger.conf gerado sai (o Compose da versão anterior não o monta)" test -e "$G/logger.conf"
+check "... e o modules.conf, que tem modelo, continua gerado" test -s "$G/modules.conf"
+mv "$D/asterisk/logger.conf.fora" "$D/asterisk/logger.conf"
 mv "$D/asterisk/rtp.conf.tmpl" "$D/asterisk/rtp.conf.tmpl.fora"
 ( source "$KIT/_common.sh"; render_asterisk_config --rollback ) >/dev/null 2>&1; equal "na volta, os outros modelos continuam obrigatórios" 1 "$?"
 mv "$D/asterisk/rtp.conf.tmpl.fora" "$D/asterisk/rtp.conf.tmpl"
