@@ -22,7 +22,7 @@ async function setup(label: string) {
 }
 
 /** A chave do cérebro, o teste dela e a lista guardada, como a tela de Cérebros grava. */
-async function withBrain(org: string, brain: string, options: { key?: boolean; check?: string } = {}): Promise<string> {
+async function withBrain(org: string, brain: string, options: { key?: boolean; check?: string; models?: boolean } = {}): Promise<string> {
   const cipher = encryptSecret(KEY, SECRET_KEY);
   await withOrg(panel.app, org, async (q) => {
     if (options.key !== false) await q.exec("insert into settings (organization_id, key, value, secret) values ($1, $2, to_jsonb($3::text), true)", [org, `brain.${brain}.api_key`, cipher]);
@@ -31,7 +31,7 @@ async function withBrain(org: string, brain: string, options: { key?: boolean; c
       `brain.${brain}.key_check`,
       JSON.stringify({ result: options.check ?? "accepted", status: options.check && options.check !== "accepted" ? 401 : 200, checkedAt: NOW.toISOString() }),
     ]);
-    await q.exec("insert into settings (organization_id, key, value) values ($1, $2, $3)", [
+    if (options.models !== false) await q.exec("insert into settings (organization_id, key, value) values ($1, $2, $3)", [
       org,
       `brain.${brain}.models`,
       JSON.stringify({ fetchedAt: NOW.toISOString(), models: [{ id: "com-preco", label: "Com preço", price: PRICE }, { id: "claude-sem-preco", label: "Sem preço" }] }),
@@ -125,6 +125,19 @@ describe("GET /agents/{id}/analysis-status", () => {
       const result = await status(operator.cookie, id);
       expect([result.status, result.code]).toEqual([404, "not_found"]);
     }
+  });
+
+  it("os avisos só leem as configurações da própria organização", async () => {
+    const { org, operator } = await setup("status settings meus");
+    const other = await createOrganization(panel.app, "status settings outra");
+    // A outra tem a chave aceita e a lista; a minha não tem chave do anthropic e tem a do openai sem lista.
+    await withBrain(other, "anthropic");
+    await withBrain(other, "openai");
+    await withBrain(org, "openai", { models: false });
+    const problems = async (stored: unknown) => ((await status(operator.cookie, await newAgent(org, stored))).data as { problems: string[] }).problems;
+
+    expect(await problems(brain("anthropic", "com-preco"))).toEqual(["key_gone"]);
+    expect(await problems(brain("openai", "com-preco"))).toEqual(["model_gone"]);
   });
 
   it("organização suspensa: 409, como a leitura do próprio agente (só as rotas da conta passam)", async () => {
