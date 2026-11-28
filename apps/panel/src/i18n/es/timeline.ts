@@ -370,6 +370,7 @@ const timeline: TimelineDictionary = {
     drop_follow_up_result: {
       whatsapp_sent: "El mensaje de WhatsApp a quien llamó salió.",
       whatsapp_failed: "El mensaje de WhatsApp a quien llamó no salió.",
+      whatsapp_do_not_call: "El mensaje de WhatsApp a quien llamó no salió: el número entró en la lista de no llamar antes del envío.",
       call_back_placed: "La devolución de la llamada salió (intento {attempt}).",
       call_back_refused: "La devolución no salió (intento {attempt}): {reason}.",
       call_back_expired: "La devolución no salió (intento {attempt}): el proceso de voz no marcó a tiempo.",

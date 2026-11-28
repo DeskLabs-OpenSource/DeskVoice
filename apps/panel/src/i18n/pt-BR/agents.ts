@@ -158,6 +158,8 @@ const agents = {
   callerIdleGuardHint: "Depois de 10 segundos em silêncio, o agente pergunta se a pessoa ainda está na linha e, 10 segundos depois, pergunta de novo. Mais 8 segundos sem resposta, ele se despede e encerra. Qualquer som da pessoa volta a contagem ao zero. Desligada, o agente não pergunta, e a ligação calada segue até a duração máxima.",
   maxMinutes: "Duração máxima, em minutos",
   costCeiling: "Teto de custo, em dólares",
+  costCeilingHint: "Zero é \"sem teto\": este agente não põe teto de custo por ligação. Um teto de outro agente por onde a ligação passou continua valendo. Um valor que arredonda para US$ 0,00, como 0,004, também é zero.",
+  costCeilingNone: "Com este valor, o agente fica sem teto de custo por ligação.",
   enabledLabel: "Agente ligado",
   enabledHint: "Desligado, o agente não atende, e as chamadas para os números dele são recusadas com aviso.",
   delete: "Apagar agente",

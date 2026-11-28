@@ -25,6 +25,7 @@ import { readVocabulary, vocabularyCountText, vocabularyErrorText } from "../../
 import { agentTabs, changedTabs, DRAFT_TAB, FORM_TABS, hiddenTabOf, parseAgentTab, type AgentTab } from "./agent-tabs";
 import { analysisPatch, toAnalysisDraft, type AnalysisDraft } from "./analysis-choice";
 import { AgentBrains } from "./brains";
+import { costCeilingCents, CostCeilingHint } from "./cost-ceiling";
 import { EngineField, newAgentEngine } from "./engine-field";
 import { PipelineBlock, usePipelineData } from "./pipeline-block";
 import { NO_PIECES, pipelineMissing, piecesOf, pipelineToSave, shownPieces, type PipelinePieces } from "./pipeline-pieces";
@@ -302,7 +303,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
         transferReturnsToAgent: draft.transferReturns,
         callerIdleGuard: draft.callerIdleGuard,
         maxCallSeconds: Math.round(Number(draft.maxMinutes) * 60),
-        costCeilingCents: Math.round(Number(draft.costCeiling.replace(",", ".")) * 100),
+        costCeilingCents: costCeilingCents(draft.costCeiling),
         enabled: draft.enabled,
         followUpOwnerUserId: draft.followUpOwner === "" ? null : draft.followUpOwner,
         listeningEnvironment: draft.listeningEnvironment,
@@ -485,7 +486,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 set("analysis", next);
                 setAcceptUnmeasured(accept);
               }}
-              costCeilingCents={Math.round(Number(draft.costCeiling.replace(",", ".")) * 100)}
+              costCeilingCents={costCeilingCents(draft.costCeiling)}
               analyst={analysts.data?.find((candidate) => candidate.id === draft.analystId) ?? null}
               canConfigure={canConfigure}
             />
@@ -685,7 +686,7 @@ export default function AgentPage({ params }: { params: Promise<{ id: string }> 
                 <Field label={t.maxMinutes}>
                   <TextInput mono type="number" min={1} max={120} value={draft.maxMinutes} onChange={(event) => set("maxMinutes", event.target.value)} required />
                 </Field>
-                <Field label={t.costCeiling}>
+                <Field label={t.costCeiling} hint={<CostCeilingHint t={t} value={draft.costCeiling} />}>
                   <TextInput mono inputMode="decimal" value={draft.costCeiling} onChange={(event) => set("costCeiling", event.target.value)} required />
                 </Field>
               </div>

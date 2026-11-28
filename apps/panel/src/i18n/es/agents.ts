@@ -153,6 +153,8 @@ const agents: AgentsDictionary = {
   callerIdleGuardHint: "Después de 10 segundos en silencio, el agente pregunta si la persona sigue en la línea y, 10 segundos después, pregunta de nuevo. Tras 8 segundos más sin respuesta, se despide y termina la llamada. Cualquier sonido de la persona reinicia la cuenta. Desactivada, el agente no pregunta, y la llamada en silencio sigue hasta la duración máxima.",
   maxMinutes: "Duración máxima, en minutos",
   costCeiling: "Tope de costo, en dólares",
+  costCeilingHint: "Cero es \"sin tope\": este agente no pone tope de costo por llamada. El tope de otro agente por el que pasó la llamada sigue valiendo. Un valor que se redondea a US$ 0,00, como 0,004, también es cero.",
+  costCeilingNone: "Con este valor, el agente queda sin tope de costo por llamada.",
   enabledLabel: "Agente encendido",
   enabledHint: "Apagado, el agente no atiende, y las llamadas a sus números se rechazan con aviso.",
   delete: "Borrar agente",
