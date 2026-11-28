@@ -12,7 +12,10 @@ import { GET as installationEvents } from "./installation/events/route";
 import { PATCH as switchTrunkFilter } from "./trunks/[id]/inbound-filter/route";
 import { PATCH as patchTrunk } from "./trunks/[id]/route";
 import { POST as createTrunk } from "./trunks/route";
-import { TRUNK_OVERLAP_CHECKS_PER_MINUTE, trunkOverlapLimiter } from "./trunks/store";
+import enInstallation from "../../../i18n/en/installation";
+import esInstallation from "../../../i18n/es/installation";
+import ptBRInstallation from "../../../i18n/pt-BR/installation";
+import { TRUNK_OVERLAP_CHECKS_BEFORE_AUDIT, TRUNK_OVERLAP_CHECKS_PER_MINUTE, trunkOverlapDailyChecks, trunkOverlapLimiter } from "./trunks/store";
 
 const panel = startPanel();
 
@@ -22,6 +25,7 @@ beforeEach(async () => {
   await withSystem(panel.app, (q) => q.exec("delete from trunks"));
   // O limite por minuto é do processo e o relógio de teste é fixo: cada teste começa do zero.
   trunkOverlapLimiter.clear();
+  trunkOverlapDailyChecks.clear();
   panel.clock.at = NOW;
   panel.voice.respond = () => Response.json({ applied: true, detail: "1 line(s) written, reloaded and listed by the telephony server.", skipped: [] });
 });
@@ -409,5 +413,103 @@ describe("a edição que faz a linha passar a entrar no agrupamento confere", ()
     const s = await scene();
     const body = { host: "203.0.113.6", authMode: "register", username: "conta100", password: "segredo" };
     expect(await s.create(body)).toMatchObject({ status: 409, code: "trunk_overlap_unconfirmed" });
+  });
+});
+
+/** As linhas inteiras dos eventos `trunk_overlap_many_checks` da organização, como estão no banco. */
+const manyChecksEvents = (organizationId: string) =>
+  withSystem(panel.app, (q) =>
+    q.many<{ row: Record<string, unknown> }>("select to_jsonb(e) as row from installation_events e where kind = 'trunk_overlap_many_checks' and organization_id = $1 order by id", [
+      organizationId,
+    ]),
+  );
+
+const DAY = 24 * 60 * 60 * 1000;
+
+describe("a organização que confere muitas faixas no dia aparece na auditoria", () => {
+  /**
+   * Faz `n` conferências que respondem "não" (linhas por IP fora de qualquer faixa de outra
+   * organização), no dia `day` depois de `NOW`. Começa um minuto depois, fora do minuto em que a
+   * cena gravou a linha da B, e o relógio anda um minuto a cada `TRUNK_OVERLAP_CHECKS_PER_MINUTE`,
+   * para o limite por minuto não responder 429.
+   */
+  function checker(cookie: string, prefix: string) {
+    let done = 0;
+    return async (n: number, day = 0): Promise<void> => {
+      for (let index = 0; index < n; index += 1) {
+        panel.clock.at = new Date(NOW.getTime() + day * DAY + (1 + Math.floor(done / TRUNK_OVERLAP_CHECKS_PER_MINUTE)) * 60_000);
+        const octet = (done % 250) + 1;
+        const answer = await call(createTrunk, { method: "POST", cookie, body: { name: `Livre ${prefix} ${done}`, host: `${prefix}.${octet}`, authMode: "ip" } });
+        // A resposta é a de sempre: a contagem não muda o que o operador vê.
+        expect(answer.status).toBe(200);
+        done += 1;
+      }
+    };
+  }
+
+  it(`T19: ${TRUNK_OVERLAP_CHECKS_BEFORE_AUDIT} conferências "não" não gravam nada; a seguinte grava 1 evento só com a organização e quem conferiu; a outra depois dela não grava de novo`, async () => {
+    const s = await scene();
+    const check = checker(s.personA.cookie, "198.51.100");
+    await check(TRUNK_OVERLAP_CHECKS_BEFORE_AUDIT);
+    expect(await manyChecksEvents(s.a)).toEqual([]);
+
+    await check(1);
+    const events = await manyChecksEvents(s.a);
+    expect(events).toHaveLength(1);
+    const row = events[0]?.row ?? {};
+    expect(row).toMatchObject({ kind: "trunk_overlap_many_checks", organization_id: s.a, actor_account_id: await accountOf(s.personA.id), payload: {} });
+    const text = JSON.stringify(row);
+    for (const secret of [s.bTrunk, s.b, B_NAME, B_LINE, B_RANGE, "203.0.113", "198.51.100", "Organização B", await accountOf(s.personB.id)]) expect(text).not.toContain(secret);
+
+    await check(1);
+    expect(await manyChecksEvents(s.a)).toHaveLength(1);
+    expect(await manyChecksEvents(s.b)).toEqual([]);
+
+    // Quem administra a instalação vê o evento.
+    const admin = await createUser(panel.app, await createOrganization(panel.app, `Instalação ${randomUUID().slice(0, 8)}`), "owner");
+    await withSystem(panel.app, async (q) => q.exec("update accounts set installation_admin_at = $2 where id = $1", [await accountOf(admin.id), NOW]));
+    const listed = await call(installationEvents, { cookie: admin.cookie });
+    const shown = (listed.data as Array<{ kind: string; organizationId: string | null }>).filter((event) => event.kind === "trunk_overlap_many_checks" && event.organizationId === s.a);
+    expect(shown).toHaveLength(1);
+  });
+
+  it("T20: no dia seguinte (UTC) a conta recomeça: a conferência que passa do número grava de novo, uma vez", async () => {
+    const s = await scene();
+    const check = checker(s.personA.cookie, "198.51.100");
+    await check(TRUNK_OVERLAP_CHECKS_BEFORE_AUDIT + 2);
+    expect(await manyChecksEvents(s.a)).toHaveLength(1);
+
+    const nextDay = checker(s.personA.cookie, "192.0.2");
+    await nextDay(TRUNK_OVERLAP_CHECKS_BEFORE_AUDIT, 1);
+    expect(await manyChecksEvents(s.a)).toHaveLength(1);
+    await nextDay(1, 1);
+    expect(await manyChecksEvents(s.a)).toHaveLength(2);
+    await nextDay(1, 1);
+    expect(await manyChecksEvents(s.a)).toHaveLength(2);
+  });
+
+  it("T21: cada organização tem a própria conta", async () => {
+    const s = await scene();
+    await checker(s.personA.cookie, "198.51.100")(TRUNK_OVERLAP_CHECKS_BEFORE_AUDIT + 1);
+    expect(await manyChecksEvents(s.a)).toHaveLength(1);
+
+    // A linha da B gravada na cena já foi uma conferência do dia.
+    const fromB = checker(s.personB.cookie, "192.0.2");
+    await fromB(TRUNK_OVERLAP_CHECKS_BEFORE_AUDIT - 1);
+    expect(await manyChecksEvents(s.b)).toEqual([]);
+    await fromB(1);
+    const events = await manyChecksEvents(s.b);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.row).toMatchObject({ organization_id: s.b, actor_account_id: await accountOf(s.personB.id) });
+    expect(await manyChecksEvents(s.a)).toHaveLength(1);
+  });
+
+  it("T22: a frase da auditoria traz o número e só quem conferiu e a organização, nos três idiomas", () => {
+    for (const t of [ptBRInstallation, enInstallation, esInstallation]) {
+      const text = t.audit.kinds.trunk_overlap_many_checks;
+      expect(text).toContain(String(TRUNK_OVERLAP_CHECKS_BEFORE_AUDIT));
+      expect(text.match(/\{[a-zA-Z]+\}/g)?.sort()).toEqual(["{org}", "{who}"]);
+    }
+    expect(ptBRInstallation.audit.kinds.trunk_overlap_many_checks).toBe("{who} conferiu faixas de linha em {org} mais de 20 vezes hoje.");
   });
 });

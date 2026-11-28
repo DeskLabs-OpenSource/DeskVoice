@@ -169,6 +169,7 @@ const installation: InstallationDictionary = {
       update_requested: "{who} requested the update to version {target}, from {org}.",
       trunk_overlap_refused: "{who} tried to save in {org} a line whose range overlaps that of another organization. The screen asked for confirmation.",
       trunk_overlap_confirmed: "{who} saved in {org}, after the warning, a line whose range overlaps that of another organization. The lines recognized by IP of both stop receiving calls.",
+      trunk_overlap_many_checks: "{who} checked line ranges in {org} more than 20 times today.",
     },
     sources: {
       command: "through the command on the server",
