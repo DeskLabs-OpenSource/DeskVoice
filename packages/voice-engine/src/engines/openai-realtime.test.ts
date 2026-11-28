@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pcm16ToUlaw } from "../resample";
 import { nextEvent, startFakeProvider } from "../testing/fake-provider";
 import { expireAtOnce, startFakeHttp } from "../testing/fake-http";
-import type { ClassifyOptions, KeyCheckOptions, VoiceSession, VoiceSessionConfig } from "../types";
+import type { ClassifyOptions, KeyCheckOptions, SideUsageLine, VoiceSession, VoiceSessionConfig } from "../types";
 import { estimateCostCents } from "../pricing";
 import engine, { usageOf } from "./openai-realtime";
 
@@ -434,6 +434,86 @@ describe("openai-realtime (contrato com servidor falso)", () => {
     session.say("marcador");
     const first = await fake.waitFor((m) => m.type === "input_audio_buffer.commit" || m.type === "response.create");
     expect(first).toMatchObject({ type: "response.create", response: { instructions: expect.stringContaining("marcador") } });
+  });
+
+  describe("a transcrição de quem ligou é cobrada à parte e vai ao extrato (item 3.4 da revisão fria da 0.50.0)", () => {
+    // 1 s de quem ligou em PCM16 8 kHz.
+    const oneSecond = Buffer.alloc(16_000);
+    async function listen() {
+      const { session } = await openSession({ greeting: undefined });
+      const lines: SideUsageLine[] = [];
+      session.on("sideUsage", (line) => lines.push(line));
+      return { session, lines };
+    }
+    const until = async (check: () => boolean) => {
+      for (let i = 0; i < 200 && !check(); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(check()).toBe(true);
+    };
+
+    it("com o consumo em tokens: linha do modelo de transcrição, no preço dele, sem estimativa", async () => {
+      const { lines } = await listen();
+      fake.send({
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "item_a",
+        content_index: 0,
+        transcript: "Hey, can you hear me?",
+        usage: { type: "tokens", total_tokens: 22, input_tokens: 13, input_token_details: { text_tokens: 0, audio_tokens: 13 }, output_tokens: 9 },
+      });
+      await until(() => lines.length === 1);
+      expect(lines[0]).toEqual({ model: "gpt-4o-mini-transcribe", pricing: engine.transcription?.pricing, usage: { inputTokens: 13, outputTokens: 9 }, estimated: false });
+      // US$ 1,25 e US$ 5,00 por milhão: 13 e 9 tokens dão menos de um centavo, arredondado para cima.
+      expect(estimateCostCents(lines[0]!.pricing, lines[0]!.usage)).toBe(1);
+    });
+
+    it("com o consumo em segundos: a duração que o provedor declarou, sem estimativa", async () => {
+      const { lines } = await listen();
+      fake.send({ type: "conversation.item.input_audio_transcription.completed", item_id: "item_a", transcript: "sim", usage: { type: "duration", seconds: 2.5 } });
+      await until(() => lines.length === 1);
+      expect(lines[0]).toMatchObject({ model: "gpt-4o-mini-transcribe", usage: { seconds: 2.5 }, estimated: false });
+    });
+
+    it("sem o consumo: estimado pelo áudio que cada item levou, e marcado como estimado", async () => {
+      const { session, lines } = await listen();
+      session.sendAudio(oneSecond);
+      session.sendAudio(oneSecond);
+      fake.send({ type: "input_audio_buffer.committed", item_id: "item_a" });
+      // O fechamento do primeiro item chega antes do áudio do segundo.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      session.sendAudio(oneSecond);
+      fake.send({ type: "input_audio_buffer.committed", item_id: "item_b" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // A transcrição corre em paralelo e pode chegar fora de ordem.
+      fake.send({ type: "conversation.item.input_audio_transcription.completed", item_id: "item_b", transcript: "amanhã" });
+      fake.send({ type: "conversation.item.input_audio_transcription.completed", item_id: "item_a", transcript: "quero remarcar", usage: { type: "outro" } });
+      await until(() => lines.length === 2);
+      expect(lines.map((line) => [line.usage, line.estimated])).toEqual([
+        [{ seconds: 1 }, true],
+        [{ seconds: 2 }, true],
+      ]);
+      // 3 s a US$ 0,003 por minuto: menos de um centavo, arredondado para cima. Nunca zero.
+      expect(lines.reduce((sum, line) => sum + estimateCostCents(line.pricing, line.usage), 0)).toBeGreaterThan(0);
+    });
+
+    it("sem o consumo e sem o item: conta todo o áudio ainda sem transcrição", async () => {
+      const { session, lines } = await listen();
+      session.sendAudio(oneSecond);
+      session.sendAudio(oneSecond);
+      session.sendAudio(oneSecond);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      fake.send({ type: "conversation.item.input_audio_transcription.completed", transcript: "alô" });
+      await until(() => lines.length === 1);
+      expect(lines[0]).toMatchObject({ usage: { seconds: 3 }, estimated: true });
+    });
+
+    it("transcrição vazia também é cobrada: a linha sai, o texto não", async () => {
+      const { session, lines } = await listen();
+      const transcripts: string[] = [];
+      session.on("transcript", (turn) => transcripts.push(turn.text));
+      fake.send({ type: "conversation.item.input_audio_transcription.completed", item_id: "item_a", transcript: "  ", usage: { type: "tokens", input_tokens: 4, output_tokens: 0 } });
+      await until(() => lines.length === 1);
+      expect(lines[0]).toMatchObject({ usage: { inputTokens: 4, outputTokens: 0 }, estimated: false });
+      expect(transcripts).toEqual([]);
+    });
   });
 
   it("evento error do provedor vira error sem fechar; mensagem fora do formato é ignorada", async () => {
