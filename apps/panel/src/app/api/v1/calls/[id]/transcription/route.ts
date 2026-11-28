@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { TRANSCRIPT_RETENTION_SETTING, decryptSecret, enqueueTask, lockCall, recordEvent, recordingPath, transcriptRetentionOf, type OrgQuery } from "@deskvoice/core";
+import { SPEND_CAP_REACHED, TRANSCRIPT_RETENTION_SETTING, decryptSecret, enqueueTask, lockCall, recordEvent, recordingPath, spendCapReached, transcriptRetentionOf, type OrgQuery } from "@deskvoice/core";
 // Pelo caminho do arquivo: o índice do pacote carrega a descoberta por pasta, que não existe no Next.
 import { MICROCENTS_PER_CENT } from "@deskvoice/voice-engine/pricing";
 import { recordingSideEstimate, splitRecording } from "@deskvoice/voice-engine/transcription";
@@ -175,6 +175,10 @@ export const POST = handle(
     // ponytail: confere o que já foi gasto, não o que a transcrição vai custar (centavos por minuto).
     if (agent && agent.cost_ceiling_cents > 0 && call.cost_cents >= agent.cost_ceiling_cents) {
       throw new ApiError(409, "transcription_cost_ceiling", "This call already reached the agent's cost ceiling.");
+    }
+    // O teto do mês da organização, pelo mesmo caminho das portas da ligação: no teto, o pedido não sai.
+    if ((await spendCapReached(q, now)).reached) {
+      throw new ApiError(409, SPEND_CAP_REACHED, "This organization reached its monthly spending cap. The installation administration can change the cap.");
     }
 
     const recording = recordingPath(deps.recordingsDir, q.organizationId, callId);

@@ -1,6 +1,7 @@
 // O bloco "Pipeline" da tela do agente no navegador (fatia 5b-2 do pipeline, ressalvas 1 e 2 da DESA-437):
 // o Ouvir de uma voz da ElevenLabs diz o erro quando a amostra não toca, pelo endereço que falha e pelo
-// navegador que recusa o `play()`, e salvar um agente pela tela nunca leva `pipeline` no PATCH.
+// navegador que recusa o `play()`, e salvar um agente pela tela só leva `pipeline` no PATCH quando o campo
+// Motor está no Pipeline ou sai dele (fatia 6b).
 //
 // A instalação do CI não tem chave da ElevenLabs nem de cérebro: a lista de vozes, a de cérebros e a de
 // modelos vêm interceptadas no navegador, no formato das rotas. O resto (a página, o salvar, o PATCH e a
@@ -87,7 +88,7 @@ test("pipeline: o navegador que recusa o play() faz o Ouvir dizer o erro", async
   expect(pieces.sampleRequests()).toBe(0);
 });
 
-test("pipeline: salvar um agente Gemini pela tela, mexendo no bloco, não leva `pipeline` no PATCH; o Pipeline não é escolhível", async ({ page }) => {
+test("pipeline: salvar um agente Gemini pela tela, mexendo no bloco, não leva `pipeline` no PATCH; sem a chave da transcrição, o Pipeline não é escolhível", async ({ page }) => {
   await signIn(page);
   await interceptPieces(page);
   const agentId = await createAgent(page, { engine: "gemini-live" });
@@ -114,4 +115,119 @@ test("pipeline: salvar um agente Gemini pela tela, mexendo no bloco, não leva `
   // O agente continua no Gemini, sem pipeline.
   const stored = (await (await page.request.get(`/api/v1/agents/${agentId}`)).json()) as { data: { engine: string; pipeline: unknown } };
   expect([stored.data.engine, stored.data.pipeline]).toEqual(["gemini-live", null]);
+});
+
+/**
+ * O Pipeline montado nesta organização (fatia 6b): `/engines` sem motivo no pipeline, a transcrição da
+ * OpenAI com a chave e a confirmação, e a conta da ElevenLabs confirmada. O resto é o da instalação.
+ */
+async function interceptAssembled(page: Page): Promise<void> {
+  await interceptPieces(page);
+  await page.route(/\/api\/v1\/engines$/, async (route) => {
+    const real = (await (await route.fetch()).json()) as { data: Array<Record<string, unknown>> };
+    return answer(route, real.data.map((engine) => (engine.assembled === true ? { ...engine, unavailable: null } : engine)));
+  });
+  await page.route(/\/api\/v1\/transcribers$/, (route) =>
+    answer(route, [{ id: "openai", label: "OpenAI (gpt-4o-mini-transcribe)", provider: "openai", processingLocation: { kind: "undeclared" }, keyConfigured: true, consent: { name: "Ana", at: "2026-11-26T12:00:00.000Z" } }]),
+  );
+  await page.route(/\/api\/v1\/synthesizers$/, (route) =>
+    answer(route, [{ id: "elevenlabs", label: "ElevenLabs", provider: "elevenlabs", processingLocation: { kind: "undeclared" }, configured: true, consent: { name: "Ana", at: "2026-11-26T12:00:00.000Z" } }]),
+  );
+}
+
+const CHOICE = { transcriber: "openai", brain: "openai", model: "modelo-a", synthesizer: "elevenlabs", voiceId: "v-bia" };
+const engineField = (page: Page) => page.getByRole("combobox", { name: agents.engine, exact: true });
+const agentPatch = (page: Page) => page.waitForRequest((request) => request.method() === "PATCH" && /\/api\/v1\/agents\/[^/]+$/.test(request.url()));
+
+test("pipeline (6b): escolher o Pipeline e a voz pela tela leva as peças no PATCH, e a recusa do servidor aparece na tela", async ({ page }) => {
+  await signIn(page);
+  await interceptAssembled(page);
+  const agentId = await createAgent(page, { engine: "gemini-live" });
+  await page.goto(`/agents/${agentId}`);
+
+  await expect(engineField(page).locator('option[value="pipeline"]')).toBeEnabled();
+  await engineField(page).selectOption("pipeline");
+  await expect(engineField(page)).toHaveValue("pipeline");
+  // A linha da transcrição provisória, no campo Motor e no bloco.
+  await expect(page.getByText(agents.pipelineTranscriberProvisional, { exact: true })).toHaveCount(2);
+
+  // Sem voz marcada, o salvar diz o que falta e não manda nada.
+  let patches = 0;
+  page.on("request", (request) => {
+    if (request.method() === "PATCH" && /\/api\/v1\/agents\/[^/]+$/.test(request.url())) patches += 1;
+  });
+  await page.getByRole("button", { name: common.actions.save, exact: true }).click();
+  await expect(page.getByText(agents.pipelineMissingPiece.voice, { exact: true })).toBeVisible();
+  expect(patches).toBe(0);
+
+  await pipelineBlock(page).getByRole("radio", { name: fill(agents.pipelineVoiceUse, { voice: VOICE }), exact: true }).check();
+  await expect(page.getByText(agents.pipelineMissingPiece.voice, { exact: true })).toHaveCount(0);
+  const patch = agentPatch(page);
+  await page.getByRole("button", { name: common.actions.save, exact: true }).click();
+  const body = (await patch).postDataJSON() as Record<string, unknown>;
+  // O motor de antes fica em `engine`; as peças vão em `pipeline`, na forma da 5a.
+  expect(body).toEqual(expect.objectContaining({ engine: "gemini-live", pipeline: CHOICE }));
+
+  // A instalação do CI não tem a lista de preços do cérebro: o servidor recusa com `pipeline_piece_unpriced`, e a tela diz qual peça.
+  await expect(page.getByText(common.errors.pipeline_piece_unpriced.replace("{piece}", common.pipelinePieces.brain ?? ""), { exact: true })).toBeVisible();
+  const stored = (await (await page.request.get(`/api/v1/agents/${agentId}`)).json()) as { data: { engine: string; pipeline: unknown } };
+  expect([stored.data.engine, stored.data.pipeline]).toEqual(["gemini-live", null]);
+});
+
+test("pipeline (6b): o agente no Pipeline mostra a escolha gravada, e voltar ao Gemini leva `pipeline: null`, que o servidor grava", async ({ page }) => {
+  await signIn(page);
+  await interceptAssembled(page);
+  const agentId = await createAgent(page, { engine: "gemini-live" });
+  // A leitura do agente como se ele já estivesse no Pipeline: o CI não consegue gravar a escolha (sem preço do cérebro).
+  await page.route(new RegExp(`/api/v1/agents/${agentId}$`), async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const real = (await (await route.fetch()).json()) as { data: Record<string, unknown> };
+    return answer(route, { ...real.data, pipeline: CHOICE });
+  });
+  await page.goto(`/agents/${agentId}`);
+
+  await expect(engineField(page)).toHaveValue("pipeline");
+  await expect(pipelineBlock(page).getByRole("radio", { name: fill(agents.pipelineVoiceUse, { voice: VOICE }), exact: true })).toBeChecked();
+  await expect(pipelineBlock(page).getByRole("combobox", { name: agents.pipelineModel })).toHaveValue("modelo-a");
+
+  await engineField(page).selectOption("gemini-live");
+  const patch = agentPatch(page);
+  await page.getByRole("button", { name: common.actions.save, exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: common.actions.saved })).toHaveText(common.actions.saved);
+  expect((await patch).postDataJSON()).toEqual(expect.objectContaining({ engine: "gemini-live", pipeline: null }));
+});
+
+test("pipeline (abas): salvar de outra aba com uma peça faltando abre a aba Agente, rola até o bloco e diz a peça, sem PATCH", async ({ page }) => {
+  // Ressalva da revisora no #605: a peça que falta está no bloco da aba Agente, e o salvar pode vir de
+  // qualquer aba do formulário. O bloco não é um campo que o navegador recuse: quem abre a aba e rola é o `reveal`.
+  await signIn(page);
+  await interceptAssembled(page);
+  const agentId = await createAgent(page, { engine: "gemini-live" });
+  await page.goto(`/agents/${agentId}`);
+  const agentTab = page.getByRole("tab", { name: agents.tabs.agente, exact: true });
+  const advancedTab = page.getByRole("tab", { name: agents.tabs.avancado, exact: true });
+
+  // O Pipeline escolhido, sem voz marcada: a peça que falta é a voz.
+  await engineField(page).selectOption("pipeline");
+  await expect(engineField(page)).toHaveValue("pipeline");
+  // Do alto da aba Agente, o bloco fica abaixo da dobra: sem a rolagem, ele não estaria na tela.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(pipelineBlock(page)).not.toBeInViewport();
+
+  await advancedTab.click();
+  await expect(advancedTab).toHaveAttribute("aria-selected", "true");
+  await expect(pipelineBlock(page)).toBeHidden();
+  await page.evaluate(() => window.scrollTo(0, 0));
+
+  let patches = 0;
+  page.on("request", (request) => {
+    if (request.method() === "PATCH" && /\/api\/v1\/agents\/[^/]+$/.test(request.url())) patches += 1;
+  });
+  await page.getByRole("button", { name: common.actions.save, exact: true }).click();
+
+  await expect(agentTab).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL(/\?aba=agente$/);
+  await expect(pipelineBlock(page)).toBeInViewport();
+  await expect(page.getByText(agents.pipelineMissingPiece.voice, { exact: true })).toBeVisible();
+  expect(patches).toBe(0);
 });

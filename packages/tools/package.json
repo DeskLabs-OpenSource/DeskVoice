@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./deskcomm-channel": "./src/connectors/deskcomm-channel.ts",
     "./waha": "./src/connectors/waha.ts",
     "./webhook-events": "./src/connectors/webhook-events.ts",
     "./webhook-timeout": "./src/connectors/webhook-timeout.ts",

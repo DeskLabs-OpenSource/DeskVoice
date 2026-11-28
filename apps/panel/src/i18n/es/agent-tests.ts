@@ -1,10 +1,7 @@
 import type { AgentTestsDictionary } from "../pt-BR/agent-tests";
 
 const agentTests: AgentTestsDictionary = {
-  back: "Volver al agente",
-  link: "Pruebas del agente",
-  linkLead: "Escriba conversaciones y verifique lo que decide el agente, antes de ponerlo en marcha.",
-  title: "Pruebas de {agent}",
+  tabTitle: "Pruebas del agente",
   lead: "Cada prueba es una conversación escrita: lo que dice quien llama y lo que el agente tiene que hacer. La prueba corre solo cuando usted hace clic.",
   costNotice: "Cada ronda usa el motor de este agente con su clave y entra en el costo del mes. Ninguna herramienta corre de verdad.",
   scope: "La prueba verifica lo que el agente decide, y no cómo escucha y habla.",

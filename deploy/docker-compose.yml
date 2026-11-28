@@ -291,6 +291,8 @@ services:
       - ./asterisk/generated/rtp.conf:/etc/asterisk/rtp.conf:ro
       - ./asterisk/generated/pjsip.conf:/etc/asterisk/pjsip.conf:ro
       - ./asterisk/generated/modules.conf:/etc/asterisk/modules.conf:ro
+      # O log vai só para o console, que o `logging` abaixo limita: sem arquivo dentro do contêiner.
+      - ./asterisk/generated/logger.conf:/etc/asterisk/logger.conf:ro
       - asterisk-generated:/etc/asterisk/generated
     healthcheck:
       test: ["CMD", "asterisk", "-rx", "core show uptime"]
