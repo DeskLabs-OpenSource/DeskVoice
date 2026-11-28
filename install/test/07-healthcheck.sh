@@ -22,6 +22,11 @@ contains "... e diz o tamanho" "$(line 'Log do Asterisk')" "3 MB em /var/log/ast
 check "o log é medido de dentro do contêiner do Asterisk" grep -q "exec -T asterisk du -sm /var/log/asterisk" "$FAKE_DIR/calls.log"
 echo 1023 > "$FAKE_DIR/asterisk_log_mb"
 contains "log do Asterisk logo abaixo de 1 GB ainda é ok" "$(bash "$H" 2>&1 | grep 'Log do Asterisk')" "ok "
+# A fronteira: 1024 MB (1 GB) já é aviso. Um `-gt` no lugar do `-ge` a deixaria passar como ok.
+echo 1024 > "$FAKE_DIR/asterisk_log_mb"
+out="$(bash "$H" 2>&1)"
+equal "log do Asterisk em 1 GB exato é aviso" "aviso Log do Asterisk" "$(line 'Log do Asterisk' | awk '{ print $1, $2, $3, $4 }')"
+contains "... com o tamanho" "$(line 'Log do Asterisk')" "ocupa 1024 MB"
 echo 9900 > "$FAKE_DIR/asterisk_log_mb"
 out="$(bash "$H" 2>&1)"; equal "log do Asterisk grande não é falha: sai com zero" 0 "$?"
 contains "log do Asterisk grande é aviso" "$(line 'Log do Asterisk')" "aviso"
