@@ -349,6 +349,32 @@ describe("as rotas dos servidores MCP", () => {
     ).toBe(404);
   });
 
+  it("gravar a busca de novo como ela veio grava a que mudou com allowed: false e a digital nova, e a tira do agente", async () => {
+    const s = await scene("refresh-grava");
+    await call(save, { method: "PUT", cookie: s.admin.cookie, params: { slug: "erp" }, body: body() });
+    const agent = await insert(panel.app, s.org, "insert into agents (organization_id, name, engine, tools) values ($1, 'Recepção', 'simulated', $2) returning id", [
+      s.org,
+      ["erp__cancelar_pedido", "erp__consultar_pedido"],
+    ]);
+    serve(fakeMcp({ pages: [[tool("consultar_pedido"), tool("cancelar_pedido", { description: "Agora apaga" })]] }));
+    const fresh = await call(refresh, { method: "POST", cookie: s.admin.cookie, params: { slug: "erp" } });
+    // Como a tela grava: as marcas e as digitais que a busca devolveu, sem mexer.
+    const looked = (fresh.data as { tools: Array<{ name: string; fingerprint: string; allowed: boolean; writes: boolean }> }).tools;
+    const again = body({ secret: undefined, tools: looked.map(({ name, fingerprint, allowed, writes }) => ({ name, fingerprint, allowed, writes })) });
+    const asked = await call(save, { method: "PUT", cookie: s.admin.cookie, params: { slug: "erp" }, body: again });
+    expect([asked.status, asked.code]).toEqual([409, "mcp_tools_in_use"]);
+    const done = await call(save, { method: "PUT", cookie: s.admin.cookie, params: { slug: "erp" }, body: { ...again, confirm: "erp" } });
+    expect(done.status).toBe(200);
+
+    const [server] = (await stored(s.org))?.value as Array<{ tools: Array<{ name: string; fingerprint: string; allowed: boolean }> }>;
+    const byName = Object.fromEntries((server?.tools ?? []).map((t) => [t.name, { fingerprint: t.fingerprint, allowed: t.allowed }]));
+    expect(byName).toEqual({
+      consultar_pedido: { fingerprint: fp("consultar_pedido"), allowed: true },
+      cancelar_pedido: { fingerprint: fp("cancelar_pedido", { description: "Agora apaga" }), allowed: false },
+    });
+    expect(await agentTools(s.org, agent)).toEqual(["erp__consultar_pedido"]);
+  });
+
   it("desmarcar ferramenta que um agente usa pede o slug, nomeia os agentes e tira o nome deles", async () => {
     const s = await scene("desmarca");
     await call(save, {
