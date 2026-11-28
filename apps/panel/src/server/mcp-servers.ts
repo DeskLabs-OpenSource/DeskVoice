@@ -37,7 +37,8 @@ export const discoverBody = z.object({
 /**
  * O que a tela grava. Das ferramentas, só o nome, a impressão digital e as marcas: a descrição e o
  * esquema vêm da busca feita aqui, nunca da tela. `confirm` igual ao `slug` autoriza desmarcar
- * ferramenta que algum agente usa.
+ * ferramenta que algum agente usa. `create` marca o pedido de criação: com um `slug` que já existe na
+organização, ele é recusado com 409 e o servidor gravado não muda.
  */
 export const saveBody = z.object({
   label: z.string().trim().min(1).max(60),
@@ -57,6 +58,7 @@ export const saveBody = z.object({
     .max(200)
     .refine((tools) => new Set(tools.map((tool) => tool.name)).size === tools.length, "tool names must be unique"),
   confirm: z.string().optional(),
+  create: z.boolean().optional(),
 });
 
 export const deleteBody = z.object({ confirm: z.string().optional() });
@@ -178,6 +180,12 @@ const loadOne = async (q: OrgQuery, deps: ServerDeps, slug: string) => {
 export const storedServer = (deps: ServerDeps, session: Session, slug: string): Promise<RegisteredMcpServer | undefined> =>
   withOrg(deps.db, session.organizationId, async (q) => (await loadOne(q, deps, slug)).server);
 
+/** O pedido de criação não cai em cima de um servidor gravado: o `slug` é único na organização. */
+export const refuseTaken = (create: boolean | undefined, previous: RegisteredMcpServer | undefined): void => {
+  if (create === true && previous !== undefined)
+    throw new ApiError(409, "mcp_server_exists", "A server with this slug already exists. Choose another slug, or edit the existing server.");
+};
+
 /** O que a busca antes da transação usou e trouxe. */
 export interface Looked {
   secret: string | undefined;
@@ -190,6 +198,8 @@ export interface Looked {
  */
 export async function saveServer(q: OrgQuery, deps: ServerDeps, slug: string, body: z.output<typeof saveBody>, looked: Looked): Promise<McpServerView & { droppedFrom: string[] }> {
   const { servers, server: previous } = await loadOne(q, deps, slug);
+  // De novo dentro da transação: outro pedido pode ter criado o mesmo `slug` depois da busca.
+  refuseTaken(body.create, previous);
   const keptSecret = secretFor(previous, body);
   // O gravado mudou entre a busca e a transação: a busca foi feita com outra credencial.
   if (keptSecret !== looked.secret) throw new ApiError(409, "mcp_server_changed", "The server changed while it was being saved. Load the page again.");

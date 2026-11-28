@@ -179,6 +179,7 @@ const common: CommonDictionary = {
     mcp_snapshot_changed: "The tools changed on the server since the lookup. Look them up again before saving.",
     mcp_tool_unsupported: "A ticked tool is outside what DeskVoice understands and cannot be allowed.",
     mcp_tools_in_use: "Agents use tools that would stop counting. Confirm by typing the server identifier.",
+    mcp_server_exists: "A server with this identifier already exists. Choose another one, or edit the registered server.",
     mcp_server_changed: "The server was changed while you were saving. Reload the page.",
     confirm_mismatch: "The typed text does not match. Type the identifier exactly as shown.",
     unknown_setting: "This setting does not exist in this version.",

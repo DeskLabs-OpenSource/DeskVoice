@@ -180,6 +180,7 @@ const common = {
     mcp_snapshot_changed: "As ferramentas mudaram no servidor desde a busca. Busque de novo antes de salvar.",
     mcp_tool_unsupported: "Uma ferramenta marcada está fora do que o DeskVoice entende e não pode ser liberada.",
     mcp_tools_in_use: "Agentes usam ferramentas que deixariam de valer. Confirme digitando o identificador do servidor.",
+    mcp_server_exists: "Já existe um servidor com este identificador. Escolha outro, ou edite o servidor cadastrado.",
     mcp_server_changed: "O servidor foi alterado enquanto você salvava. Recarregue a página.",
     confirm_mismatch: "O texto digitado não confere. Digite o identificador exatamente como aparece.",
     unknown_setting: "Esta configuração não existe nesta versão.",

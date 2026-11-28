@@ -179,6 +179,7 @@ const common: CommonDictionary = {
     mcp_snapshot_changed: "Las herramientas cambiaron en el servidor desde la búsqueda. Busca de nuevo antes de guardar.",
     mcp_tool_unsupported: "Una herramienta marcada está fuera de lo que DeskVoice entiende y no se puede habilitar.",
     mcp_tools_in_use: "Hay agentes que usan herramientas que dejarían de valer. Confirma escribiendo el identificador del servidor.",
+    mcp_server_exists: "Ya existe un servidor con este identificador. Elige otro, o edita el servidor registrado.",
     mcp_server_changed: "El servidor cambió mientras guardabas. Recarga la página.",
     confirm_mismatch: "El texto escrito no coincide. Escribe el identificador tal como aparece.",
     unknown_setting: "Esta configuración no existe en esta versión.",

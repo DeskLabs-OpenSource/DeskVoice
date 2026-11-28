@@ -147,6 +147,8 @@ export function McpServers() {
         writes: tool.writes,
       })),
       ...(confirm !== undefined && { confirm }),
+      // "Adicionar" é pedido de criação: a API recusa um `slug` que já existe, em vez de gravar por cima.
+      ...(current.original === null && { create: true }),
     };
     let refusal: ApiFailure | undefined;
     const ok = await save.run(async () => {
@@ -178,6 +180,9 @@ export function McpServers() {
           }
         : current,
     );
+
+  // No "Adicionar", o identificador de um servidor já cadastrado é avisado antes de buscar ou salvar.
+  const taken = draft !== null && draft.original === null && (servers.data ?? []).some((server) => server.slug === draft.slug);
 
   const changeText = (change: Change | undefined): string | null => (change === "new" ? t.changeNew : change === "changed" ? t.changeChanged : null);
 
@@ -317,6 +322,7 @@ export function McpServers() {
                   maxLength={16}
                   pattern="[a-z0-9]{1,16}"
                 />
+                {taken ? <Notice tone="fail">{t.slugTaken}</Notice> : null}
               </Field>
               <Field label={t.label}>
                 <TextInput value={draft.label} onChange={(event) => patch({ label: event.target.value })} required maxLength={60} />
@@ -368,7 +374,7 @@ export function McpServers() {
               </Field>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <Button variant="secondary" busy={look.busy} disabled={draft.url === ""} onClick={() => void lookUp(draft)}>
+              <Button variant="secondary" busy={look.busy} disabled={draft.url === "" || taken} onClick={() => void lookUp(draft)}>
                 {draft.original !== null && draft.original.url === draft.url ? t.lookAgain : t.look}
               </Button>
               {redirect === null ? <ActionStatus action={look} /> : null}
@@ -458,7 +464,7 @@ export function McpServers() {
             ) : null}
 
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" busy={save.busy} disabled={draft.tools === null || !SLUG.test(draft.slug)}>
+              <Button type="submit" busy={save.busy} disabled={draft.tools === null || !SLUG.test(draft.slug) || taken}>
                 {t.save}
               </Button>
               <Button variant="ghost" onClick={close}>

@@ -160,6 +160,35 @@ describe("as rotas dos servidores MCP", () => {
     expect(((await stored(s.org))?.value as Array<Record<string, unknown>>)[0]).not.toHaveProperty("secret");
   });
 
+  it("o pedido de criação com um slug que já existe é recusado com 409, sem buscar, e o servidor gravado não muda", async () => {
+    const s = await scene("criar");
+    const created = await call(save, {
+      method: "PUT",
+      cookie: s.admin.cookie,
+      params: { slug: "erp" },
+      body: body({ create: true }),
+    });
+    expect(created.status).toBe(200);
+    const before = (await stored(s.org))?.value;
+
+    serve(fakeMcp({ pages: [[tool("consultar_pedido"), tool("cancelar_pedido")]] }));
+    const again = await call(save, {
+      method: "PUT",
+      cookie: s.admin.cookie,
+      params: { slug: "erp" },
+      body: body({ create: true, label: "Outro", url: URL_B, secret: "Bearer outro" }),
+    });
+    expect(again.status).toBe(409);
+    expect(again.text).toContain("mcp_server_exists");
+    // Recusado antes da busca: o endereço digitado não recebe nada.
+    expect(mcp.requests).toHaveLength(0);
+    const after = (await stored(s.org))?.value as Array<Record<string, unknown>>;
+    expect(after).toEqual(before);
+    expect(after).toHaveLength(1);
+    expect(after[0]).toMatchObject({ slug: "erp", label: "ERP", url: URL_A });
+    expect(decryptSecret(after[0]?.secret as string, panel.deps.secretKey)).toBe(SECRET);
+  });
+
   it("recusa a impressão digital que não bate com a busca, e nada muda", async () => {
     const s = await scene("retrato");
     await call(save, {
