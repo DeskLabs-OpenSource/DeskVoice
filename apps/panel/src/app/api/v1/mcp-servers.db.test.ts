@@ -5,7 +5,7 @@ import { fakeMcp, tool, type FakeMcp } from "../../../../../../packages/tools/te
 import { call, createOrganization, createUser, insert, startPanel, type Result } from "../../../../test/kit";
 import { POST as discover } from "./mcp-servers/discover/route";
 import { GET as list } from "./mcp-servers/route";
-import { lookTools, saveBody, saveServer } from "../../../server/mcp-servers";
+import { lookTools, removeServer, saveBody, saveServer } from "../../../server/mcp-servers";
 import { DELETE as remove, PUT as save } from "./mcp-servers/[slug]/route";
 import { POST as refresh } from "./mcp-servers/[slug]/refresh/route";
 
@@ -248,6 +248,34 @@ describe("as rotas dos servidores MCP", () => {
         ["erp", "ERP"],
         ["loja", "Segundo"],
       ]);
+    });
+
+    it("o descadastro de um e a gravação de outro ao mesmo tempo: fica só o gravado", async () => {
+      const s = await scene("corrida descadastro");
+      expect((await call(save, { method: "PUT", cookie: s.admin.cookie, params: { slug: "erp" }, body: body({ create: true }) })).status).toBe(200);
+      let release = (): void => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let opened = (_pid: number): void => undefined;
+      const pid = new Promise<number>((resolve) => {
+        opened = resolve;
+      });
+      const one = withOrg(panel.app, s.org, async (q) => {
+        const removed = await removeServer(q, panel.deps, "erp");
+        opened((await q.one<{ pid: number }>("select pg_backend_pid() as pid"))?.pid ?? 0);
+        await held;
+        return removed;
+      });
+      const firstPid = await pid;
+      const other = call(save, { method: "PUT", cookie: s.admin.cookie, params: { slug: "loja" }, body: body({ create: true, label: "Segundo" }) });
+      const waited = await someoneWaitsFor(s.org, firstPid);
+      release();
+      await one;
+      expect(waited).toBe(true);
+      expect((await other).status).toBe(200);
+      const after = (await stored(s.org))?.value as Array<Record<string, unknown>>;
+      expect(after.map((server) => [server.slug, server.label])).toEqual([["loja", "Segundo"]]);
     });
   });
 
