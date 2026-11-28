@@ -66,7 +66,7 @@ const installation: InstallationDictionary = {
     limitsOutboundReturnsOff: "Outbound calls for this organization come back as it left them: off.",
     limitsSpendCap: "Monthly spending cap, in dollars",
     limitsSpendCapSpent: "Spent this month: {spent}.",
-    limitsSpendCapApprox: "Approximate: it includes estimated cost and leaves out what could not be measured. At the cap, every new call is refused (a call in progress goes on).",
+    limitsSpendCapApprox: "Approximate: it includes estimated cost and leaves out what could not be measured. At the cap, every new call is refused (a call in progress goes on), and the outcome, the analysis and the recording transcription are no longer requested from the provider.",
     limitsSpendCapInvalid: "The monthly spending cap must be an amount in dollars, like 50 or 49.90, or be left empty.",
     defaultsTitle: "Defaults for new organizations",
     defaultsLead: "The limits, the time zone and the language each new organization starts with. Applies only to organizations created from now on: existing ones stay as they are.",
