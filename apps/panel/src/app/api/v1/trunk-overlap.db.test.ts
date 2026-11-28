@@ -307,3 +307,107 @@ describe("auditoria e limite da conferência de faixa", () => {
     expect(await confirmedEvents(s.a)).toHaveLength(1);
   });
 });
+
+/**
+ * A linha da A que ainda não entra no agrupamento (o processo de voz a deixa de fora do arquivo),
+ * gravada antes da linha por IP da B: ninguém é avisado, porque ela não tira nada do ar.
+ */
+async function dormantScene(dormant: Record<string, unknown>) {
+  const a = await createOrganization(panel.app, `Organização A ${randomUUID().slice(0, 8)}`);
+  const personA = await createUser(panel.app, a, "owner");
+  const mine = await call(createTrunk, { method: "POST", cookie: personA.cookie, body: { name: "Linha da A", ...dormant } });
+  expect(mine.status).toBe(200);
+  const id = (mine.data as { id: string }).id;
+  const b = await createOrganization(panel.app, B_NAME);
+  const personB = await createUser(panel.app, b, "owner");
+  // A linha dormente da A não tira a da B do ar: a B salva sem pergunta.
+  const created = await call(createTrunk, { method: "POST", cookie: personB.cookie, body: { name: B_LINE, host: B_RANGE, authMode: "ip" } });
+  expect(created.status).toBe(200);
+  const edit = (body: Record<string, unknown>) => call(patchTrunk, { method: "PATCH", cookie: personA.cookie, params: { id }, body });
+  return { a, b, personA, personB, id, edit };
+}
+
+const REGISTER = { host: "203.0.113.5", authMode: "register" };
+
+describe("a edição que faz a linha passar a entrar no agrupamento confere", () => {
+  // Cada caso: a linha dormente da A e a edição que, sem mexer no endereço, faz a linha entrar.
+  const cases: Array<{ name: string; dormant: Record<string, unknown>; wake: Record<string, unknown>; setup?: (id: string) => Promise<void> }> = [
+    { name: "a senha da linha por registro sem senha", dormant: { ...REGISTER, username: "conta100" }, wake: { password: "segredo" } },
+    { name: "o usuário da linha por registro sem usuário", dormant: { ...REGISTER, password: "segredo" }, wake: { username: "conta100", password: "segredo" } },
+    { name: "o usuário que o arquivo não aceita", dormant: { ...REGISTER, username: "joão", password: "segredo" }, wake: { username: "joao", password: "segredo" } },
+    { name: "a senha que começa com '>'", dormant: { ...REGISTER, username: "conta100", password: ">segredo" }, wake: { password: "segredo" } },
+    { name: "a senha com espaço na borda", dormant: { ...REGISTER, username: "conta100", password: "segredo " }, wake: { password: "segredo" } },
+    { name: "o destino de saída que é um bloco", dormant: { host: "203.0.113.5", authMode: "ip", outboundHost: "198.51.100.0/30" }, wake: { outboundHost: null } },
+    {
+      name: "a senha gravada que não dá para ler",
+      dormant: { ...REGISTER, username: "conta100", password: "segredo" },
+      wake: { password: "segredo" },
+      // O processo de voz deixa de fora a linha cuja senha não decifra (`planTrunks`).
+      setup: (id) => withSystem(panel.app, (q) => q.exec("update trunks set secret_enc = 'v1:lixo' where id = $1", [id])).then(() => undefined),
+    },
+  ];
+
+  for (const { name, dormant, wake, setup } of cases) {
+    it(`T15: ${name}: sem confirmação, 409 e 1 evento de recusa; com ela, salva e grava 1 evento de confirmação`, async () => {
+      if (setup) {
+        // A linha começa válida e fica ilegível só depois da linha da B, que então não é avisada.
+        const s = await dormantScene({ ...dormant, host: "198.51.100.9" });
+        await setup(s.id);
+        await withSystem(panel.app, (q) => q.exec("update trunks set host = '203.0.113.5' where id = $1", [s.id]));
+        await expectWakeConfers(s, wake);
+        return;
+      }
+      await expectWakeConfers(await dormantScene(dormant), wake);
+    });
+  }
+
+  async function expectWakeConfers(s: Awaited<ReturnType<typeof dormantScene>>, wake: Record<string, unknown>) {
+    const before = (await withSystem(panel.app, (q) => q.one<{ row: unknown }>("select to_jsonb(t) - 'updated_at' as row from trunks t where id = $1", [s.id])))?.row;
+    const refused = await s.edit(wake);
+    expect(refused).toMatchObject({ status: 409, code: "trunk_overlap_unconfirmed" });
+    expect((await withSystem(panel.app, (q) => q.one<{ row: unknown }>("select to_jsonb(t) - 'updated_at' as row from trunks t where id = $1", [s.id])))?.row).toEqual(before);
+    expect(await refusedEvents(s.a)).toHaveLength(1);
+    expect((await s.edit({ ...wake, confirmOverlap: true })).status).toBe(200);
+    expect(await confirmedEvents(s.a)).toHaveLength(1);
+    expect(await refusedEvents(s.b)).toEqual([]);
+  }
+
+  it("T16: a linha dormente que muda de endereço e segue dormente não confere nem gasta tentativa", async () => {
+    const s = await dormantScene({ ...REGISTER, username: "conta100" });
+    for (let index = 0; index < TRUNK_OVERLAP_CHECKS_PER_MINUTE + 2; index += 1) {
+      expect((await s.edit({ host: `203.0.113.${index % 2 === 0 ? 6 : 5}` })).status).toBe(200);
+    }
+    expect(await refusedEvents(s.a)).toEqual([]);
+  });
+
+  it("T16: a linha que sai do agrupamento não confere (tirar uma linha nunca tira outra do ar)", async () => {
+    const s = await scene();
+    const mine = await s.create({ host: "203.0.113.5", authMode: "ip", confirmOverlap: true });
+    const id = (mine.data as { id: string }).id;
+    expect((await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { outboundHost: "198.51.100.0/30" } })).status).toBe(200);
+    expect(await refusedEvents(s.a)).toEqual([]);
+  });
+
+  it("T18: criar na faixa da B a linha que ainda não entra no agrupamento não pergunta; a edição que a faz entrar, sim", async () => {
+    const s = await scene();
+    const mine = await s.create({ ...REGISTER, username: "conta100" });
+    expect(mine.status).toBe(200);
+    expect(await refusedEvents(s.a)).toEqual([]);
+    const id = (mine.data as { id: string }).id;
+    expect(await call(patchTrunk, { method: "PATCH", cookie: s.personA.cookie, params: { id }, body: { password: "segredo" } })).toMatchObject({
+      status: 409,
+      code: "trunk_overlap_unconfirmed",
+    });
+  });
+
+  it("T17: a linha da organização em exclusão não conta (o processo de voz já a deixou de fora)", async () => {
+    const c = await createOrganization(panel.app, `Organização C ${randomUUID().slice(0, 8)}`);
+    const personC = await createUser(panel.app, c, "owner");
+    expect((await call(createTrunk, { method: "POST", cookie: personC.cookie, body: { name: "Linha da C", host: "203.0.113.5", authMode: "ip" } })).status).toBe(200);
+    await withSystem(panel.app, (q) => q.exec("update organizations set deleting_at = $2 where id = $1", [c, NOW]));
+    // Com a C de fora, a linha da B está no ar; a linha por registro da A a tira do ar.
+    const s = await scene();
+    const body = { host: "203.0.113.6", authMode: "register", username: "conta100", password: "segredo" };
+    expect(await s.create(body)).toMatchObject({ status: 409, code: "trunk_overlap_unconfirmed" });
+  });
+});
