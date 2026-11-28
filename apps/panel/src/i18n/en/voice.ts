@@ -60,7 +60,7 @@ const voice: VoiceDictionary = {
     country: "The {provider} service is hosted {country}.",
   },
   countries: { US: "in the United States" },
-  providers: { elevenlabs: "ElevenLabs" },
+  providers: { elevenlabs: "ElevenLabs", openai: "OpenAI" },
   retention: {
     elevenlabs: [
       "By default, ElevenLabs keeps the text sent and the audio generated in the account history until someone deletes the generation or the account. The page gives no other period.",

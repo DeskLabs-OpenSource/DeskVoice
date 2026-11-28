@@ -1,0 +1,3 @@
+// Fora dos motores, importar uma peça é assunto da cerca one-file-per-piece, e não desta.
+import openai from "./brains/openai";
+export default openai;

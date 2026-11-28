@@ -1,0 +1,387 @@
+// O servidor grava `agents.pipeline` (desenho do pipeline, fatia 5a, com a seção 9.1): uma escolha
+// válida grava e volta no GET, e `null` limpa; cada recusa é 422, diz qual peça, e não grava nada; a
+// voz que leva o texto para fora do servidor só passa com a confirmação da fatia 1b; o simulado só nos
+// testes; e o agente sem `pipeline` fica como era. A recusa na abertura da ligação (a coluna fora da
+// forma, a L2 da DESA-421) está em `apps/voice/src/call-session-pipeline.db.test.ts`.
+import type * as brainsModule from "../../../../server/brains";
+import type * as synthesizersModule from "../../../../server/synthesizers";
+import type * as transcribersModule from "../../../../server/transcribers";
+import { encryptSecret, withOrg, type OrgQuery } from "@deskvoice/core";
+import { loadTranscribers } from "@deskvoice/voice-engine";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { NOW, SECRET_KEY, call, createOrganization, createUser, startPanel } from "../../../../../test/kit";
+import { listTranscribers } from "../../../../server/transcribers";
+import { DELETE as removeVoiceKey } from "../synthesizers/[synthesizer]/key/route";
+import { GET as readAgent, PATCH as patchAgent } from "./[id]/route";
+import { GET as listEngines } from "../engines/route";
+import { PUT as putSetting } from "../settings/[key]/route";
+import { GET as listAgents, POST as createAgent } from "./route";
+
+// As peças reais têm todas `chat` e preço, e nenhuma transcrição é de fora: as recusas 2, 3 e a da
+// transcrição de fora pedem peças falsas, que só entram na pasta quando o teste liga `fakes.on`.
+const fakes = vi.hoisted(() => ({ on: false }));
+vi.mock("../../../../server/brains", async (importOriginal) => {
+  const original = await importOriginal<typeof brainsModule>();
+  return {
+    ...original,
+    listBrains: async () => {
+      const all = await original.listBrains();
+      const openai = all.find((brain) => brain.id === "openai");
+      return fakes.on && openai ? [...all, { ...openai, id: "mudo", label: "Cérebro que não conversa", chat: undefined }] : all;
+    },
+  };
+});
+vi.mock("../../../../server/synthesizers", async (importOriginal) => {
+  const original = await importOriginal<typeof synthesizersModule>();
+  return {
+    ...original,
+    listAllSynthesizers: async () => {
+      const all = await original.listAllSynthesizers();
+      const simulated = all.find((piece) => piece.id === "simulated");
+      return fakes.on && simulated ? [...all, { ...simulated, id: "sem-preco", label: "Voz sem preço", pricingOf: () => undefined }] : all;
+    },
+  };
+});
+vi.mock("../../../../server/transcribers", async (importOriginal) => {
+  const original = await importOriginal<typeof transcribersModule>();
+  return {
+    ...original,
+    listTranscribers: async () => {
+      const all = await original.listTranscribers();
+      const simulated = all.find((piece) => piece.id === "simulated");
+      return fakes.on && simulated
+        ? [...all, { ...simulated, id: "de-fora", label: "Transcrição de fora", processingLocation: { kind: "undeclared" as const } }, { ...simulated, id: "local", label: "Transcrição local" }]
+        : all;
+    },
+  };
+});
+
+const panel = startPanel();
+afterAll(() => panel.close());
+afterEach(() => {
+  fakes.on = false;
+  panel.deps.simulatedPieces = undefined;
+});
+
+const PRICE = { centsPerMillionInputTokens: 5, centsPerMillionOutputTokens: 40, source: "https://exemplo.invalid/precos", checkedOn: "2026-03-01" };
+/** A escolha válida: a transcrição simulada (só nos testes), o cérebro com preço e a ElevenLabs confirmada. */
+const CHOICE = { transcriber: "simulated", brain: "openai", model: "com-preco", synthesizer: "elevenlabs", voiceId: "v-ze" };
+
+const put = (q: OrgQuery, org: string, key: string, value: unknown, secret = false) =>
+  q.exec("insert into settings (organization_id, key, value, secret) values ($1, $2, $3, $4)", [org, key, JSON.stringify(value), secret]);
+
+/**
+ * Uma organização pronta para o pipeline, como as telas gravam: a chave e a lista do cérebro (um modelo
+ * com preço, um sem) e a chave da ElevenLabs com a confirmação nomeando o fornecedor (fatia 1b).
+ */
+async function setup(label: string, options: { consent?: boolean } = {}) {
+  const org = await createOrganization(panel.app, label);
+  const owner = await createUser(panel.app, org, "owner");
+  await withOrg(panel.app, org, async (q) => {
+    await put(q, org, "brain.openai.api_key", encryptSecret("chave-inventada-do-cerebro", SECRET_KEY), true);
+    await put(q, org, "brain.openai.models", { fetchedAt: "2026-03-01T15:00:00.000Z", models: [{ id: "com-preco", label: "Com preço", price: PRICE }, { id: "sem-preco", label: "Sem preço" }] });
+    await put(q, org, "brain.mudo.models", { fetchedAt: "2026-03-01T15:00:00.000Z", models: [{ id: "com-preco", label: "Com preço", price: PRICE }] });
+    await put(q, org, "synthesizer.elevenlabs.api_key", encryptSecret("chave-inventada-da-voz", SECRET_KEY), true);
+    if (options.consent !== false) await put(q, org, "synthesizer.elevenlabs.consent", { userId: owner.id, confirmedAt: NOW.toISOString() });
+  });
+  return { org, cookie: owner.cookie };
+}
+
+type Agent = { id: string; name: string; pipeline: unknown } & Record<string, unknown>;
+const create = (cookie: string, body: object) => call(createAgent, { method: "POST", cookie, body: { name: "Recepção", engine: "simulated", ...body } });
+const patch = (cookie: string, id: string, body: object) => call(patchAgent, { method: "PATCH", cookie, params: { id }, body });
+const read = async (cookie: string, id: string) => (await call(readAgent, { cookie, params: { id } })).data as Agent;
+/** O valor da coluna e se ela é o nulo do SQL (e não o `null` do JSON). */
+const stored = (org: string, id: string) =>
+  withOrg(panel.app, org, async (q) => q.one<{ pipeline: unknown; sql_null: boolean }>("select pipeline, pipeline is null as sql_null from agents where id = $1", [id]));
+const detail = (result: { text: string }) => (JSON.parse(result.text) as { error?: { detail?: Record<string, string> } }).error?.detail;
+
+describe("agents.pipeline: a escolha das peças pela API (fatia 5a)", () => {
+  it("a pasta dos transcritores do painel acha as mesmas peças que a da sessão", async () => {
+    expect((await listTranscribers()).map((piece) => piece.id).sort()).toEqual([...(await loadTranscribers()).keys()].sort());
+  });
+
+  it("uma escolha válida grava e volta no GET, pelo POST e pelo PATCH; `null` limpa, com o nulo do SQL", async () => {
+    panel.deps.simulatedPieces = true;
+    const { org, cookie } = await setup("pipeline valido");
+    const created = await create(cookie, { pipeline: CHOICE });
+    expect(created.status).toBe(200);
+    const agent = created.data as Agent;
+    expect(agent.pipeline).toEqual(CHOICE);
+    expect((await read(cookie, agent.id)).pipeline).toEqual(CHOICE);
+    expect((await stored(org, agent.id))?.pipeline).toEqual(CHOICE);
+
+    const other = { ...CHOICE, voiceId: "v-bia" };
+    expect((await patch(cookie, agent.id, { pipeline: other })).status).toBe(200);
+    expect((await read(cookie, agent.id)).pipeline).toEqual(other);
+    expect(((await call(listAgents, { cookie })).data as Agent[]).find((each) => each.id === agent.id)?.pipeline).toEqual(other);
+
+    expect((await patch(cookie, agent.id, { pipeline: null })).status).toBe(200);
+    expect((await read(cookie, agent.id)).pipeline).toBeNull();
+    expect(await stored(org, agent.id)).toEqual({ pipeline: null, sql_null: true });
+
+    // Gravar `pipeline` não troca o `engine`: os dois convivem, e quem decide na ligação é a sessão.
+    expect((await patch(cookie, agent.id, { pipeline: CHOICE })).status).toBe(200);
+    expect((await read(cookie, agent.id)).engine).toBe("simulated");
+  });
+
+  it("salvar outro campo não regrava a escolha, nem a fora da forma gravada à mão", async () => {
+    panel.deps.simulatedPieces = true;
+    const { org, cookie } = await setup("pipeline outro campo");
+    const agent = (await create(cookie, { pipeline: CHOICE })).data as Agent;
+    expect((await patch(cookie, agent.id, { name: "Vendas" })).status).toBe(200);
+    expect((await stored(org, agent.id))?.pipeline).toEqual(CHOICE);
+
+    const handWritten = { transcriber: "simulated", brain: "openai" };
+    await withOrg(panel.app, org, (q) => q.exec("update agents set pipeline = $2 where id = $1", [agent.id, JSON.stringify(handWritten)]));
+    expect((await patch(cookie, agent.id, { name: "Suporte" })).status).toBe(200);
+    expect((await stored(org, agent.id))?.pipeline).toEqual(handWritten);
+  });
+
+  it("a escolha fora da forma não passa da validação, e nada é gravado", async () => {
+    panel.deps.simulatedPieces = true;
+    const { org, cookie } = await setup("pipeline forma");
+    const agent = (await create(cookie, { pipeline: CHOICE })).data as Agent;
+    for (const wrong of [{ ...CHOICE, voiceId: undefined }, { ...CHOICE, model: "" }, "simulated", [CHOICE]]) {
+      const result = await patch(cookie, agent.id, { pipeline: wrong });
+      expect([result.status, result.code]).toEqual([400, "validation_error"]);
+    }
+    expect((await stored(org, agent.id))?.pipeline).toEqual(CHOICE);
+  });
+});
+
+describe("agents.pipeline: as recusas, 422 com a peça, e nada gravado", () => {
+  /** Cada recusa pelo PATCH (a escolha válida de antes fica) e pelo POST (nenhum agente novo). */
+  async function refused(label: string, choice: object, expected: { code: string; piece: string; pieceId: string; model?: string; says: string[] }, options: { consent?: boolean } = {}) {
+    const { org, cookie } = await setup(label, options);
+    panel.deps.simulatedPieces = true;
+    const valid = { ...CHOICE, synthesizer: options.consent === false ? "simulated" : CHOICE.synthesizer };
+    const agent = (await create(cookie, { pipeline: valid })).data as Agent;
+    const simulatedPieces = choice === CHOICE_SIMULATED ? undefined : true;
+    panel.deps.simulatedPieces = simulatedPieces;
+    const before = await withOrg(panel.app, org, (q) => q.many("select id from agents"));
+    for (const result of [await patch(cookie, agent.id, { pipeline: choice }), await create(cookie, { name: "Outro", pipeline: choice })]) {
+      expect([result.status, result.code]).toEqual([422, expected.code]);
+      expect(detail(result)).toEqual({ piece: expected.piece, pieceId: expected.pieceId, ...(expected.model !== undefined && { model: expected.model }) });
+      for (const part of expected.says) expect(result.message).toContain(part);
+    }
+    expect((await stored(org, agent.id))?.pipeline).toEqual(valid);
+    expect(await withOrg(panel.app, org, (q) => q.many("select id from agents"))).toEqual(before);
+  }
+  const CHOICE_SIMULATED = { ...CHOICE };
+
+  it("1: a peça que não está na pasta, cada uma das três", async () => {
+    await refused("pipeline sem transcricao", { ...CHOICE, transcriber: "deepgram" }, { code: "pipeline_piece_unknown", piece: "transcriber", pieceId: "deepgram", says: ['"deepgram"', "transcriber"] });
+    await refused("pipeline sem cerebro", { ...CHOICE, brain: "cerebro-novo" }, { code: "pipeline_piece_unknown", piece: "brain", pieceId: "cerebro-novo", says: ['"cerebro-novo"', "brain"] });
+    await refused("pipeline sem voz", { ...CHOICE, synthesizer: "voz-nova" }, { code: "pipeline_piece_unknown", piece: "synthesizer", pieceId: "voz-nova", says: ['"voz-nova"', "voice"] });
+  });
+
+  it("2: o cérebro sem `chat`, e o modelo fora da lista ou nela sem preço (a regra da 3b-2)", async () => {
+    fakes.on = true;
+    await refused("pipeline cerebro mudo", { ...CHOICE, brain: "mudo" }, { code: "pipeline_brain_cannot_chat", piece: "brain", pieceId: "mudo", says: ['"mudo"', "conversation"] });
+    await refused("pipeline modelo sem preco", { ...CHOICE, model: "sem-preco" }, { code: "pipeline_piece_unpriced", piece: "brain", pieceId: "openai", model: "sem-preco", says: ['"sem-preco"', '"openai"', "no known price"] });
+    await refused("pipeline modelo fora", { ...CHOICE, model: "fora-da-lista" }, { code: "pipeline_piece_unpriced", piece: "brain", pieceId: "openai", model: "fora-da-lista", says: ['"fora-da-lista"', "no known price"] });
+  });
+
+  it("3: a voz sem preço para o modelo padrão dela", async () => {
+    fakes.on = true;
+    await refused("pipeline voz sem preco", { ...CHOICE, synthesizer: "sem-preco" }, { code: "pipeline_piece_unpriced", piece: "synthesizer", pieceId: "sem-preco", model: "simulated", says: ['"sem-preco"', "no known price"] });
+  });
+
+  it("4 (9.1): a peça que leva o dado de quem ligou para fora sem confirmação gravada diz qual é e onde confirmar", async () => {
+    await refused(
+      "pipeline voz sem confirmacao",
+      CHOICE,
+      { code: "pipeline_piece_unconfirmed", piece: "synthesizer", pieceId: "elevenlabs", says: ["ElevenLabs", "outside this server", "Settings → Voice"] },
+      { consent: false },
+    );
+    fakes.on = true;
+    await refused("pipeline transcricao de fora", { ...CHOICE, transcriber: "de-fora" }, { code: "pipeline_piece_unconfirmed", piece: "transcriber", pieceId: "de-fora", says: ["Transcrição de fora", "caller's audio", "outside this server", "Pipeline block"] });
+  });
+
+  it("4b (9.1, fatia 6): a transcrição da OpenAI passa com a confirmação gravada; sem ela, a recusa diz qual é", async () => {
+    const { org, cookie } = await setup("pipeline transcricao openai");
+    const choice = { ...CHOICE, transcriber: "openai" };
+    const refusedResult = await create(cookie, { pipeline: choice });
+    expect([refusedResult.status, refusedResult.code, detail(refusedResult)]).toEqual([422, "pipeline_piece_unconfirmed", { piece: "transcriber", pieceId: "openai" }]);
+    await withOrg(panel.app, org, async (q) => {
+      const owner = await q.one<{ id: string }>("select id from users limit 1");
+      await put(q, org, "transcriber.openai.consent", { userId: owner?.id ?? "", confirmedAt: NOW.toISOString() });
+    });
+    const created = await create(cookie, { pipeline: choice });
+    expect(created.status).toBe(200);
+    expect((created.data as Agent).pipeline).toEqual(choice);
+  });
+
+  it("5: o transcritor simulado fora do ambiente de teste (a instalação nunca o liga)", async () => {
+    await refused("pipeline simulado", CHOICE_SIMULATED, { code: "pipeline_piece_test_only", piece: "transcriber", pieceId: "simulated", says: ["simulated transcriber", "tests"] });
+  });
+
+  it("5b: a voz simulada fora do ambiente de teste, com uma transcrição que não é a simulada (S3b da DESA-435)", async () => {
+    fakes.on = true;
+    const { org, cookie } = await setup("pipeline voz simulada");
+    const choice = { ...CHOICE, transcriber: "local", synthesizer: "simulated", voiceId: "simulated" };
+    const before = await withOrg(panel.app, org, (q) => q.many("select id from agents"));
+    for (const result of [await create(cookie, { pipeline: choice }), await create(cookie, { name: "Outro", pipeline: choice })]) {
+      expect([result.status, result.code, detail(result)]).toEqual([422, "pipeline_piece_test_only", { piece: "synthesizer", pieceId: "simulated" }]);
+      expect(result.message).toContain("simulated voice");
+    }
+    expect(await withOrg(panel.app, org, (q) => q.many("select id from agents"))).toEqual(before);
+    // Nos testes, a mesma escolha passa: a recusa é da voz simulada, e não da transcrição local.
+    panel.deps.simulatedPieces = true;
+    expect((await create(cookie, { pipeline: choice })).status).toBe(200);
+  });
+
+  it("o preço vem da lista do cérebro escolhido, e não da de outro (S14 da DESA-435)", async () => {
+    panel.deps.simulatedPieces = true;
+    const { org, cookie } = await setup("pipeline segundo cerebro");
+    // O modelo só tem preço na lista da Anthropic; a da OpenAI não o tem.
+    await withOrg(panel.app, org, (q) => put(q, org, "brain.anthropic.models", { fetchedAt: "2026-03-01T15:00:00.000Z", models: [{ id: "so-na-anthropic", label: "Só na Anthropic", price: PRICE }] }));
+    const anthropic = { ...CHOICE, brain: "anthropic", model: "so-na-anthropic" };
+    const created = await create(cookie, { pipeline: anthropic });
+    expect(created.status).toBe(200);
+    expect((await stored(org, (created.data as Agent).id))?.pipeline).toEqual(anthropic);
+    // E ao contrário: o modelo com preço na lista da OpenAI não tem preço na Anthropic.
+    const crossed = await create(cookie, { pipeline: { ...CHOICE, brain: "anthropic", model: "com-preco" } });
+    expect([crossed.status, crossed.code, detail(crossed)]).toEqual([422, "pipeline_piece_unpriced", { piece: "brain", pieceId: "anthropic", model: "com-preco" }]);
+    const wrongWay = await create(cookie, { pipeline: { ...CHOICE, model: "so-na-anthropic" } });
+    expect([wrongWay.status, wrongWay.code, detail(wrongWay)]).toEqual([422, "pipeline_piece_unpriced", { piece: "brain", pieceId: "openai", model: "so-na-anthropic" }]);
+  });
+
+  it("a confirmação apagada depois de gravar: a próxima gravação recusa, e o agente gravado fica como está", async () => {
+    panel.deps.simulatedPieces = true;
+    const { org, cookie } = await setup("pipeline confirmacao apagada");
+    const agent = (await create(cookie, { pipeline: CHOICE })).data as Agent;
+    // A confirmação sai com a chave (fatia 1b): é a única forma de a tela apagá-la.
+    expect((await call(removeVoiceKey, { method: "DELETE", cookie, params: { synthesizer: "elevenlabs" } })).status).toBe(200);
+    const again = await patch(cookie, agent.id, { pipeline: CHOICE });
+    expect([again.status, again.code, detail(again)]).toEqual([422, "pipeline_piece_unconfirmed", { piece: "synthesizer", pieceId: "elevenlabs" }]);
+    // O agente gravado não é tocado: a abertura da ligação recusa pela chave que falta (a recusa que já existe).
+    expect((await stored(org, agent.id))?.pipeline).toEqual(CHOICE);
+    expect((await patch(cookie, agent.id, { name: "Vendas" })).status).toBe(200);
+    expect((await stored(org, agent.id))?.pipeline).toEqual(CHOICE);
+  });
+});
+
+describe("o agente sem pipeline fica como era", () => {
+  it("criado e editado sem `pipeline`: a coluna fica no nulo do SQL, e a resposta só ganha `pipeline: null`", async () => {
+    const { org, cookie } = await setup("pipeline ausente");
+    const created = await create(cookie, { instructions: "Atenda bem." });
+    expect(created.status).toBe(200);
+    const agent = created.data as Agent;
+    expect(agent.pipeline).toBeNull();
+    expect(await stored(org, agent.id)).toEqual({ pipeline: null, sql_null: true });
+    expect((await patch(cookie, agent.id, { name: "Vendas", engine: "simulated", maxCallSeconds: 300 })).status).toBe(200);
+    const after = await read(cookie, agent.id);
+    expect(await stored(org, agent.id)).toEqual({ pipeline: null, sql_null: true });
+    // Os campos de antes da 5a, todos, e nenhum outro além de `pipeline`.
+    expect(Object.keys(after).sort()).toEqual(
+      [
+        "id",
+        "name",
+        "roleLabel",
+        "instructions",
+        "greeting",
+        "engine",
+        "voiceId",
+        "language",
+        "tools",
+        "enabled",
+        "maxCallSeconds",
+        "costCeilingCents",
+        "transferTo",
+        "transferReturnsToAgent",
+        "callerIdleGuard",
+        "followUpOwnerUserId",
+        "vocabulary",
+        "listeningEnvironment",
+        "agentHandoffTargets",
+        "dropFollowUp",
+        "dropFollowUpMessage",
+        "analystId",
+        "analysisBrain",
+        "pipeline",
+        "createdAt",
+        "updatedAt",
+      ].sort(),
+    );
+    expect(after).toMatchObject({ name: "Vendas", engine: "simulated", maxCallSeconds: 300, instructions: "Atenda bem.", pipeline: null });
+  });
+});
+
+describe("o motor pipeline na pasta: listado desligado, e nunca o motor de um agente (fatia 5b-1)", () => {
+  /** Os campos de cada motor antes da 5b-1: os outros motores saem exatamente com eles. */
+  const ENGINE_FIELDS = [
+    "id",
+    "label",
+    "provider",
+    "processingLocation",
+    "requiresKey",
+    "classifyTarget",
+    "baseUrl",
+    "classifyModel",
+    "classifyModelUnmeasured",
+    "classifyKeyConfigured",
+    "voices",
+    "defaultVoice",
+    "keyConfigured",
+    "keyCheck",
+    "priceCheckedOn",
+    "priceSource",
+  ].sort();
+  type EngineView = Record<string, unknown> & { id: string };
+
+  it("`/api/v1/engines` devolve o pipeline com a marca de indisponível e o motivo, e os outros motores sem campo novo", async () => {
+    const { cookie } = await setup("pipeline na lista");
+    const engines = (await call(listEngines, { cookie })).data as EngineView[];
+    expect(engines.map((engine) => engine.id).sort()).toEqual(["gemini-live", "openai-realtime", "pipeline", "simulated"]);
+    const pipeline = engines.find((engine) => engine.id === "pipeline");
+    expect(pipeline).toMatchObject({ assembled: true, unavailable: { reason: "no_transcriber_key" }, requiresKey: false, keyConfigured: false });
+    expect(Object.keys(pipeline ?? {}).sort()).toEqual([...ENGINE_FIELDS, "assembled", "unavailable"].sort());
+    for (const engine of engines.filter((each) => each.id !== "pipeline")) expect(Object.keys(engine).sort(), engine.id).toEqual(ENGINE_FIELDS);
+  });
+
+  it("com a transcrição da OpenAI na pasta, a marca sai quando a organização tem a chave do motor OpenAI Realtime, e só nela (fatia 6)", async () => {
+    const { org, cookie } = await setup("pipeline com transcricao real");
+    const other = await setup("pipeline sem a chave");
+    const before = ((await call(listEngines, { cookie })).data as EngineView[]).find((engine) => engine.id === "pipeline");
+    expect(before?.unavailable).toEqual({ reason: "no_transcriber_key" });
+    // A chave de outro nome não liga nada: só a que a peça declara.
+    await withOrg(panel.app, org, (q) => put(q, org, "transcriber.openai.api_key", encryptSecret("chave-inventada", SECRET_KEY), true));
+    expect(((await call(listEngines, { cookie })).data as EngineView[]).find((engine) => engine.id === "pipeline")?.unavailable).toEqual({ reason: "no_transcriber_key" });
+    await withOrg(panel.app, org, (q) => put(q, org, "engine.openai-realtime.api_key", encryptSecret("chave-inventada-do-motor", SECRET_KEY), true));
+    expect(((await call(listEngines, { cookie })).data as EngineView[]).find((engine) => engine.id === "pipeline")?.unavailable).toBeNull();
+    // A chave é da organização: a outra continua desligada.
+    expect(((await call(listEngines, { cookie: other.cookie })).data as EngineView[]).find((engine) => engine.id === "pipeline")?.unavailable).toEqual({ reason: "no_transcriber_key" });
+  });
+
+  it("ninguém grava o pipeline como motor: nem no POST, nem no PATCH, nem como o motor padrão; e nada muda", async () => {
+    const { org, cookie } = await setup("pipeline como motor");
+    const refused = await create(cookie, { engine: "pipeline" });
+    expect([refused.status, refused.code]).toEqual([400, "validation_error"]);
+    expect(refused.text).toContain("the pipeline is not chosen as the agent's engine");
+    expect(await withOrg(panel.app, org, (q) => q.many("select id from agents"))).toEqual([]);
+
+    const agent = (await create(cookie, { engine: "gemini-live", voiceId: "Kore" })).data as Agent;
+    const patched = await patch(cookie, agent.id, { engine: "pipeline" });
+    expect([patched.status, patched.code]).toEqual([400, "validation_error"]);
+    expect(await read(cookie, agent.id)).toMatchObject({ engine: "gemini-live", voiceId: "Kore", pipeline: null });
+
+    const put = (value: unknown) => call(putSetting, { method: "PUT", cookie, params: { key: "engine.default" }, body: { value } });
+    expect((await put("pipeline")).code).toBe("validation_error");
+    expect(await withOrg(panel.app, org, (q) => q.one("select value from settings where key = 'engine.default'"))).toBeNull();
+    expect((await put("openai-realtime")).status).toBe(200);
+  });
+
+  it("antes e depois: um agente com Gemini ou com OpenAI salva exatamente igual, com a voz dele", async () => {
+    const { org, cookie } = await setup("pipeline antes e depois");
+    for (const [engine, voiceId] of [["gemini-live", "Kore"], ["openai-realtime", "marin"]] as const) {
+      const agent = (await create(cookie, { engine, voiceId, instructions: "Atenda bem." })).data as Agent;
+      const before = await withOrg(panel.app, org, (q) => q.one("select * from agents where id = $1", [agent.id]));
+      expect((await patch(cookie, agent.id, { name: "Recepção", engine, voiceId })).status).toBe(200);
+      const after = await withOrg(panel.app, org, (q) => q.one<Record<string, unknown>>("select * from agents where id = $1", [agent.id]));
+      expect({ ...after, updated_at: undefined }).toEqual({ ...(before as Record<string, unknown>), updated_at: undefined });
+      expect(after).toMatchObject({ engine, voice_id: voiceId, pipeline: null });
+    }
+  });
+});

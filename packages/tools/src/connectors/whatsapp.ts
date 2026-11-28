@@ -7,12 +7,16 @@ import { sendViaDeskcomm } from "./deskcomm";
 import { sendViaWaha, wahaFromEnv, wahaSessionName, type WahaOptions } from "./waha";
 
 export { TRUST_CALLER_ID_KEY, WHATSAPP_CONNECTOR_KEY };
+export { checkDeskcomm, DESKCOMM_CHECK_MAX_CHANNELS, DESKCOMM_CHECK_TIMEOUT_SECONDS, type DeskcommChannel, type DeskcommCheck, type DeskcommPortResult } from "./deskcomm";
 
 // Como fica em `settings`: `token` cifrado com `encryptSecret`, o resto em claro. O tipo `waha` (o
 // número conectado por QR Code) não tem `url` nem `token`: o endereço e a chave são da instalação,
-// e um `url` gravado ali é descartado na leitura.
+// e um `url` gravado ali é descartado na leitura. O `deskcomm` pode ter `crmUrl` (o endereço do CRM,
+// que liga o contrato do CRM) e `channelSessionId` (o canal por onde a mensagem sai); sem `crmUrl`,
+// ele se comporta como sempre, e um `channelSessionId` sozinho não muda nada.
 const stored = z.discriminatedUnion("type", [
-  z.object({ type: z.enum(["deskcomm", "webhook"]), url: z.url(), token: z.string().min(1) }),
+  z.object({ type: z.literal("deskcomm"), url: z.url(), token: z.string().min(1), crmUrl: z.url({ protocol: /^https?$/ }).optional(), channelSessionId: z.uuid().optional() }),
+  z.object({ type: z.literal("webhook"), url: z.url(), token: z.string().min(1) }),
   z.object({ type: z.literal("waha") }),
 ]);
 
@@ -22,6 +26,10 @@ export interface HttpConnector {
   url: string;
   /** Já decifrado. */
   token: string;
+  /** Só `deskcomm`: o endereço do CRM. Com ele, o envio fala o contrato do CRM, e `url` não é usado. */
+  crmUrl?: string;
+  /** Só `deskcomm` com `crmUrl`: o canal do CRM por onde a mensagem sai. Ausente: a regra do CRM escolhe. */
+  channelSessionId?: string;
 }
 export type WhatsAppConnector = HttpConnector | { type: "waha"; /** Nome da sessão no WAHA. */ session: string };
 
@@ -48,7 +56,7 @@ export async function loadWhatsAppConnector(q: OrgQuery, secretKey: Buffer): Pro
   const value = await readSetting(q, WHATSAPP_CONNECTOR_KEY);
   if (value === null) return null;
   const parsed = stored.safeParse(value);
-  if (!parsed.success) throw new Error(`Setting ${WHATSAPP_CONNECTOR_KEY} is malformed: expected { type: 'deskcomm' | 'webhook', url, token } or { type: 'waha' }`);
+  if (!parsed.success) throw new Error(`Setting ${WHATSAPP_CONNECTOR_KEY} is malformed: expected { type: 'deskcomm' | 'webhook', url, token, crmUrl?, channelSessionId? } or { type: 'waha' }`);
   if (parsed.data.type === "waha") return { type: "waha", session: wahaSessionName(q.organizationId) };
   return { ...parsed.data, token: decryptSecret(parsed.data.token, secretKey) };
 }

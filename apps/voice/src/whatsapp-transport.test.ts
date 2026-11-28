@@ -207,6 +207,14 @@ describe("ligação pelo WhatsApp: o transporte contra o par do WaCalls", { time
     expect(context.fake.received.some((frame) => !isSilence(frame))).toBe(true);
   });
 
+  it("fechar daqui solta a ligação no WaCalls e não avisa a conversa de que quem ligou desligou", async () => {
+    const context = await connect();
+    await started(context);
+    await context.transport.close();
+    expect(context.ends).toEqual(["DELETE"]);
+    expect(context.hungUp()).toBe(0);
+  });
+
   it("a perna WebRTC cai: a conversa fica sabendo, e fechar desliga a ligação no WaCalls, que senão seguraria 30 s", async () => {
     const context = await connect();
     await context.fake.connection.close();

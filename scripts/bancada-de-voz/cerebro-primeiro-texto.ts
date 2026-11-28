@@ -26,6 +26,7 @@ import deepseek from "../../packages/voice-engine/src/brains/deepseek";
 import gemini from "../../packages/voice-engine/src/brains/gemini";
 import openai from "../../packages/voice-engine/src/brains/openai";
 import openrouter from "../../packages/voice-engine/src/brains/openrouter";
+import { PIPELINE_BRAIN_MAX_TOKENS } from "../../packages/voice-engine/src/engines/pipeline";
 import type { Usage } from "../../packages/voice-engine/src/types";
 import { percentil } from "./metricas";
 
@@ -130,6 +131,8 @@ export function medirUm(brain: Brain, apiKey: string, modelo: string, fala: stri
     ],
     tools: [],
     timeoutMs: PRAZO_MS,
+    // O mesmo teto de saída do motor pipeline: a bancada mede o pedido que a ligação manda.
+    maxTokens: PIPELINE_BRAIN_MAX_TOKENS,
   };
   return new Promise((resolve) => {
     if (!brain.chat) {

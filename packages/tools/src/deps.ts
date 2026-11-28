@@ -7,8 +7,8 @@ export interface ToolDeps extends WhatsAppDeps {
   /** Chave que decifra os segredos de `settings`. Padrão: a da configuração do processo. */
   secretKey?: () => Buffer;
   /**
-   * Cliente da agenda. Sem ele, as ferramentas de agenda recusam em voz alta e nada é gravado —
-   * é o estado de hoje: o conector com o CRM é a fatia seguinte.
+   * Cliente da agenda. Sem ele, as ferramentas de agenda recusam em voz alta e nada é gravado. O do
+   * DeskcommCRM é `createDeskcommAgendaClient`; a tela e a ligação na sessão vêm na fatia 1b da #330.
    */
   agenda?: AgendaClient;
 }

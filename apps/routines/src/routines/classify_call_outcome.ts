@@ -1,4 +1,4 @@
-import { RUBRIC_VERSION, agentAnalysisBrain, callAnalysisSchema, decryptSecret, recordEvent, scoreOf, verifyAgainstTranscript, withOrg, type OrgQuery, type TranscriptTurn } from "@deskvoice/core";
+import { RUBRIC_VERSION, agentAnalysisBrain, callAnalysisSchema, decryptSecret, recordEvent, scoreOf, SPEND_CAP_REACHED, spendCapReached, verifyAgainstTranscript, withOrg, type OrgQuery, type TranscriptTurn } from "@deskvoice/core";
 import {
   ANALYSIS_SCHEMA,
   ANALYSIS_SCHEMA_GOOGLE,
@@ -52,7 +52,7 @@ const TRANSCRIPT_LIMIT = 6000;
 type BrainRefusal = "brain_unavailable" | "brain_no_key" | "brain_unmeasured_without_ceiling";
 
 /** Por que a análise não foi pedida, ou não foi gravada. */
-type AnalysisNotDoneReason = "no_speech" | "no_key" | "engine_cannot_analyze" | "cost_ceiling" | ClassifyFailure | ClassifyDestinationRefusal | BrainRefusal;
+type AnalysisNotDoneReason = "no_speech" | "no_key" | "engine_cannot_analyze" | "cost_ceiling" | typeof SPEND_CAP_REACHED | ClassifyFailure | ClassifyDestinationRefusal | BrainRefusal;
 
 /** Mesmos nomes que o painel usa (`apps/panel/src/server/settings.ts` e `brains.ts`). */
 const ANALYSIS_BRAIN_SETTING = "calls.analysis_brain";
@@ -260,6 +260,16 @@ const classify: Routine = {
       // Sem fala nenhuma não há o que ler: melhor não gastar uma chamada para responder "unknown".
       if (falas.length === 0) {
         if (analysis) await notAnalyzed(q, callId, "no_speech", { engine: agent.engine }, now);
+        return null;
+      }
+
+      // O teto do mês da organização, pelo mesmo caminho das portas da ligação (`spendCapReached`):
+      // no teto, nem o cérebro nem o motor recebem pedido, e a linha do tempo diz por quê.
+      const cap = await spendCapReached(q, now);
+      if (cap.reached) {
+        const details = { engine: agent.engine, capCents: cap.capCents };
+        if (outcome) await recordEvent(q, callId, "outcome_not_classified", { reason: SPEND_CAP_REACHED, ...details }, now);
+        if (analysis) await notAnalyzed(q, callId, SPEND_CAP_REACHED, details, now);
         return null;
       }
 
